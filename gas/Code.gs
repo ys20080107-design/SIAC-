@@ -119,3 +119,192 @@ function columnLetter(n) {
 function reply(obj) {
   return ContentService.createTextOutput(JSON.stringify(obj)).setMimeType(ContentService.MimeType.JSON);
 }
+
+/* ======================================================================
+ * 分析シート（グラフ付き）
+ *   スプレッドシートを開くとメニュー「きづきの診断 → 分析シートを作る／作り直す」が出ます。
+ *   すべて数式でできているので、回答が増えると表もグラフも自動で更新されます。
+ *   B2 のプルダウンでグループ（?g= で指定したイベント名など）を絞り込めます。
+ * ====================================================================== */
+
+const ANALYSIS_SHEET = '分析';
+const ROLES = ['親', '子ども', '大学生'];
+const ROLE_COLORS = ['#1F72B8', '#C9781E', '#5552B0'];
+const TYPE_NAMES = ['自己分析派', 'ロールモデル派', '機会活用派', '空気読み派', 'これから探す派'];
+const TYPE_COLORS = ['#1F72B8', '#C9781E', '#2E9A6A', '#5552B0', '#C2455A'];
+const AXIS_ROWS = ['自分を知る', 'お手本・選択肢', '挑戦の機会', '流されやすさ', '柔軟度'];
+// 回答シートの見出し（診断ページと同じ文言）と、グラフ用の短い名前
+const QUESTIONS = [
+  ['Q1 自分が好きなこと・夢中になれることを、すぐに言える', 'Q1 好きなことをすぐ言える'],
+  ['Q2 「こんな人になりたい」と思えるお手本が身近にいる', 'Q2 お手本が身近にいる'],
+  ['Q3 「周りがそうしているから」という理由で決めることが多い', 'Q3 周りに合わせて決める'],
+  ['Q4 やってみたいことを、実際に試せる環境がある', 'Q4 試せる環境がある'],
+  ['Q5 自分が何をしたいのか、よく分からないことが多い', 'Q5 したいことが分からない'],
+  ['Q6 身近な人の生き方は、どれも似たようなものばかりだ', 'Q6 周りの生き方が似ている'],
+  ['Q7 周りと違っても、自分がやりたいことを選べる', 'Q7 違ってもやりたいことを選べる'],
+  ['Q8 やってみたいことがあっても、時間や周りの目を理由にあきらめることが多い', 'Q8 あきらめることが多い']
+];
+const FLEX_BINS = [[0, 19], [20, 39], [40, 59], [60, 79], [80, 100]];
+
+function onOpen() {
+  SpreadsheetApp.getUi().createMenu('きづきの診断')
+    .addItem('分析シートを作る／作り直す', 'setupAnalysis')
+    .addToUi();
+}
+
+function setupAnalysis() {
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  if (!ss.getSheetByName(ANSWER_SHEET)) ss.insertSheet(ANSWER_SHEET, 0);
+  const old = ss.getSheetByName(ANALYSIS_SHEET);
+  if (old) ss.deleteSheet(old);
+  const sh = ss.insertSheet(ANALYSIS_SHEET, 1);
+
+  // 回答シートの列を見出し名で探す（列の並びが変わっても動く）
+  const A = "'" + ANSWER_SHEET + "'";
+  const col = h => `INDEX(${A}!$A$2:$CZ,0,MATCH(${h},${A}!$1:$1,0))`;
+  const ROLE = col('"' + ROLE_HEADER + '"'), GROUP = col('"グループ"');
+  // グループ絞り込み：B2 が「すべて」なら条件なし
+  const ifs = (fn, valueRange, conds) => {
+    const base = conds.map(c => c.join(',')).join(',');
+    const head = fn === 'COUNTIFS' ? '' : valueRange + ',';
+    return `IF($B$2="すべて",${fn}(${head}${base}),${fn}(${head}${base},${GROUP},$B$2))`;
+  };
+  const avg = (valueRange, conds) => `=IFERROR(ROUND(${ifs('AVERAGEIFS', valueRange, conds)},1),"")`;
+  const cnt = conds => `=IFERROR(${ifs('COUNTIFS', '', conds)},0)`;
+
+  sh.setHiddenGridlines(true);
+  sh.setColumnWidth(1, 230);
+  sh.setColumnWidths(2, 5, 92);
+  sh.getRange('A1').setValue('きづきの診断 分析').setFontSize(16).setFontWeight('bold');
+  sh.getRange('A2').setValue('グループ').setFontWeight('bold');
+  sh.getRange('B2:C2').merge().setValue('すべて').setBackground('#EEF3F8');
+  sh.getRange('A3').setValue('B2 のプルダウンでイベント・グループを絞り込めます。表とグラフは回答が増えると自動で更新されます。')
+    .setFontColor('#5A6778').setFontSize(9);
+
+  // 補助列（非表示）：グループ一覧
+  sh.getRange('Z1').setValue('すべて');
+  sh.getRange('Z2').setFormula(`=IFERROR(SORT(UNIQUE(FILTER(${GROUP},${GROUP}<>""))),"")`);
+  sh.getRange('B2').setDataValidation(SpreadsheetApp.newDataValidation()
+    .requireValueInRange(sh.getRange('Z1:Z300'), true).setAllowInvalid(false).build());
+
+  const blocks = [];
+  const title = (r, text, note) => {
+    sh.getRange(r, 1).setValue(text).setFontSize(12).setFontWeight('bold');
+    if (note) sh.getRange(r, 2).setValue(note).setFontColor('#5A6778').setFontSize(9);
+  };
+  const header = (r, cells) => sh.getRange(r, 1, 1, cells.length).setValues([cells])
+    .setFontWeight('bold').setBackground('#EEF3F8').setHorizontalAlignment('center');
+
+  // 1. 回答者別の平均スコア
+  let r = 5;
+  title(r, '1. 回答者別の平均スコア', '0〜100。流されやすさは高いほど周囲に合わせる傾向');
+  header(r + 1, ['項目'].concat(ROLES));
+  AXIS_ROWS.forEach((name, i) => {
+    sh.getRange(r + 2 + i, 1).setValue(name);
+    ROLES.forEach((_, j) => sh.getRange(r + 2 + i, 2 + j).setFormula(
+      avg(col('$A' + (r + 2 + i)), [[ROLE, columnLetter(2 + j) + '$' + (r + 1)]])));
+  });
+  sh.getRange(r + 7, 1).setValue('サポーター適性（大学生）');
+  sh.getRange(r + 7, 4).setFormula(avg(col('"サポーター適性"'), [[ROLE, '"大学生"']]));
+  sh.getRange(r + 8, 1).setValue('回答数').setFontColor('#5A6778');
+  ROLES.forEach((_, j) => sh.getRange(r + 8, 2 + j).setFormula(cnt([[ROLE, columnLetter(2 + j) + '$' + (r + 1)]])).setFontColor('#5A6778'));
+  blocks.push({ row: r, range: sh.getRange(r + 1, 1, 6, 4), type: Charts.ChartType.COLUMN, colors: ROLE_COLORS,
+    title: '回答者別の平均スコア（0〜100）', axis: { v: [0, 100] }, height: 320 });
+
+  // 2. 質問ごとの平均
+  r = 21;
+  title(r, '2. 質問ごとの平均', '1=ちがう 〜 4=そう（素点）');
+  header(r + 1, ['質問'].concat(ROLES));
+  QUESTIONS.forEach(([full, short], i) => {
+    sh.getRange(r + 2 + i, 1).setValue(short);
+    sh.getRange(r + 2 + i, 28).setValue(full); // AB列（非表示）に元の見出し
+    ROLES.forEach((_, j) => sh.getRange(r + 2 + i, 2 + j).setFormula(
+      avg(col('$AB' + (r + 2 + i)), [[ROLE, columnLetter(2 + j) + '$' + (r + 1)]])));
+  });
+  scale(sh.getRange(r + 2, 2, 8, 3));
+  blocks.push({ row: r, range: sh.getRange(r + 1, 1, 9, 4), type: Charts.ChartType.BAR, colors: ROLE_COLORS,
+    title: '質問ごとの平均（1=ちがう〜4=そう）', axis: { h: [1, 4] }, height: 420 });
+
+  // 3. 子ども本人と大人の予想
+  r = 41;
+  title(r, '3. 子ども本人と大人の予想', '子ども本人の平均と、親・大学生が予想した答えの平均');
+  header(r + 1, ['質問', '子ども本人', '親の予想', '大学生の予想']);
+  QUESTIONS.forEach(([full, short], i) => {
+    const rr = r + 2 + i;
+    sh.getRange(rr, 1).setValue(short);
+    sh.getRange(rr, 28).setValue(full);
+    sh.getRange(rr, 29).setValue('子どもの予想Q' + (i + 1)); // AC列（非表示）
+    sh.getRange(rr, 2).setFormula(avg(col('$AB' + rr), [[ROLE, '"子ども"']]));
+    sh.getRange(rr, 3).setFormula(avg(col('$AC' + rr), [[ROLE, '"親"']]));
+    sh.getRange(rr, 4).setFormula(avg(col('$AC' + rr), [[ROLE, '"大学生"']]));
+  });
+  scale(sh.getRange(r + 2, 2, 8, 3));
+  sh.getRange(r + 10, 1).setValue('予想の一致数の平均（8問中）');
+  sh.getRange(r + 10, 3).setFormula(avg(col('"予想の一致数(子ども本人と)"'), [[ROLE, '"親"']]));
+  sh.getRange(r + 10, 4).setFormula(avg(col('"予想の一致数(子ども本人と)"'), [[ROLE, '"大学生"']]));
+  sh.getRange(r + 11, 1).setValue('一致数は、同じ端末で子どもも答えた回のみ').setFontColor('#5A6778').setFontSize(9);
+  blocks.push({ row: r, range: sh.getRange(r + 1, 1, 9, 4), type: Charts.ChartType.BAR, colors: ROLE_COLORS.slice(1, 2).concat([ROLE_COLORS[0], ROLE_COLORS[2]]),
+    title: '子ども本人の答え と 大人の予想（1〜4）', axis: { h: [1, 4] }, height: 420 });
+
+  // 4. タイプの分布
+  r = 61;
+  title(r, '4. タイプの分布（人数）', '子どもも大人向けのタイプ名で集計');
+  header(r + 1, ['回答者'].concat(TYPE_NAMES));
+  ROLES.forEach((role, i) => {
+    sh.getRange(r + 2 + i, 1).setValue(role);
+    TYPE_NAMES.forEach((_, j) => sh.getRange(r + 2 + i, 2 + j).setFormula(
+      cnt([[ROLE, '$A' + (r + 2 + i)], [col('"タイプ"'), columnLetter(2 + j) + '$' + (r + 1)]])));
+  });
+  blocks.push({ row: r, range: sh.getRange(r + 1, 1, 4, 6), type: Charts.ChartType.COLUMN, colors: TYPE_COLORS,
+    title: 'タイプの割合（回答者別）', stacked: 'percent', height: 320 });
+
+  // 5. 柔軟度の分布
+  r = 77;
+  title(r, '5. 柔軟度の分布（人数）', '柔軟度＝自分を知る・お手本・挑戦の機会・流されにくさの平均');
+  header(r + 1, ['柔軟度'].concat(ROLES));
+  FLEX_BINS.forEach(([lo, hi], i) => {
+    const rr = r + 2 + i;
+    sh.getRange(rr, 1).setValue(lo + '〜' + hi);
+    ROLES.forEach((_, j) => sh.getRange(rr, 2 + j).setFormula(cnt([
+      [ROLE, columnLetter(2 + j) + '$' + (r + 1)],
+      [col('"柔軟度"'), '">=' + lo + '"'], [col('"柔軟度"'), '"<=' + hi + '"']])));
+  });
+  blocks.push({ row: r, range: sh.getRange(r + 1, 1, 6, 4), type: Charts.ChartType.COLUMN, colors: ROLE_COLORS,
+    title: '柔軟度の分布（人数）', height: 320 });
+
+  sh.getRange('B5:F100').setHorizontalAlignment('center').setNumberFormat('0.0');
+  // 人数の表は整数表示
+  sh.getRange(13, 2, 1, 3).setNumberFormat('0');
+  sh.getRange(63, 2, 3, 5).setNumberFormat('0');
+  sh.getRange(79, 2, 5, 3).setNumberFormat('0');
+
+  // グラフ（表の右側、H列から）
+  blocks.forEach(b => {
+    let cb = sh.newChart().setChartType(b.type).addRange(b.range).setNumHeaders(1)
+      .setPosition(b.row, 8, 0, 0)
+      .setOption('title', b.title)
+      .setOption('titleTextStyle', { fontSize: 13, bold: true, color: '#1D2938' })
+      .setOption('colors', b.colors)
+      .setOption('legend', { position: 'top', textStyle: { color: '#1D2938' } })
+      .setOption('width', 640).setOption('height', b.height)
+      .setOption('backgroundColor', '#FFFFFF');
+    if (b.axis && b.axis.v) cb = cb.setOption('vAxis', { viewWindow: { min: b.axis.v[0], max: b.axis.v[1] }, gridlines: { color: '#E3EAF2' } });
+    if (b.axis && b.axis.h) cb = cb.setOption('hAxis', { viewWindow: { min: b.axis.h[0], max: b.axis.h[1] }, gridlines: { color: '#E3EAF2' } });
+    if (b.stacked) cb = cb.setOption('isStacked', b.stacked);
+    sh.insertChart(cb.build());
+  });
+
+  blocks.forEach(b => sh.getRange(b.row, 2).setHorizontalAlignment('left'));
+  sh.hideColumns(26, 4); // Z〜AC（補助列。Z はグループ一覧）
+  sh.setFrozenRows(3);
+  ss.setActiveSheet(sh);
+}
+
+function scale(range) {
+  const sh = range.getSheet();
+  const rule = SpreadsheetApp.newConditionalFormatRule()
+    .setGradientMinpointWithValue('#FFFFFF', SpreadsheetApp.InterpolationType.NUMBER, '1')
+    .setGradientMaxpointWithValue('#A9C9E8', SpreadsheetApp.InterpolationType.NUMBER, '4')
+    .setRanges([range]).build();
+  sh.setConditionalFormatRules(sh.getConditionalFormatRules().concat([rule]));
+}
