@@ -403,7 +403,11 @@ function renderCompare(){
   result.innerHTML = h;
   const cp = document.getElementById('copy'); if(cp) cp.addEventListener('click', copyAll);
   const xb = document.getElementById('xlsx'); if(xb) xb.addEventListener('click', saveXlsx);
-  const rs = document.getElementById('reset'); if(rs) rs.addEventListener('click', ()=>{ if(confirm('この端末の回答をすべて消して、最初からはじめますか？')) location.reload(); });
+  const rs = document.getElementById('reset'); if(rs) rs.addEventListener('click', ()=>{
+    if(rs.dataset.armed!=='1'){ rs.dataset.armed='1'; rs.textContent='本当に消す（もう一度押してください）'; return; }
+    ['parent','kid','univ'].forEach(k=>{ state.ans[k]={}; state.done[k]=false; state.note[k]=''; state.rid[k]=null; state.at[k]=null; state.sent[k]=''; });
+    state.sid = newId(8); switchMode('parent'); window.scrollTo(0,0);
+  });
 }
 
 function copyAll(){
@@ -457,11 +461,15 @@ function sendRow(k){
   fetch(SHEET_URL, {method:'POST', mode:'no-cors', headers:{'Content-Type':'text/plain;charset=utf-8'}, body})
     .then(()=>done(true), ()=>done(false));
 }
-function saveBook(wb, filename){
+async function saveBook(wb, filename){
   const blob = new Blob([XLSX.write(wb, {bookType:'xlsx', type:'array'})], {type:'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'});
+  // claude.ai のアーティファクト内では downloads 機能で保存（通常のWebページでは undefined）
+  const dl = window.claude && window.claude.use ? await window.claude.use('downloads').catch(()=>null) : null;
+  if(dl){ await dl.save({filename, data:blob}); return; }
   const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = filename;
   document.body.appendChild(a); a.click(); a.remove(); setTimeout(()=>URL.revokeObjectURL(a.href), 4000);
 }
+function saveErr(e){ return e && e.code==='declined' ? '保存をキャンセルしました。' : '保存できませんでした。ブラウザを変えてお試しください。'; }
 function saveXlsx(){
   const toast = document.getElementById('toast');
   if(!window.XLSX){ toast.textContent='Excel保存の準備ができていません。通信環境を確認して、もう一度押してください。'; return; }
@@ -482,8 +490,7 @@ function saveXlsx(){
   XLSX.utils.book_append_sheet(wb, ws, '回答');
   XLSX.utils.book_append_sheet(wb, wl, '凡例');
   const d = new Date();
-  try{ saveBook(wb, `kizuki_${d.getFullYear()}${pad(d.getMonth()+1)}${pad(d.getDate())}_${state.sid}.xlsx`); toast.textContent='Excelファイルを保存しました'; }
-  catch(e){ toast.textContent='保存できませんでした。ブラウザを変えてお試しください。'; }
+  saveBook(wb, `kizuki_${d.getFullYear()}${pad(d.getMonth()+1)}${pad(d.getDate())}_${state.sid}.xlsx`).then(()=>{ toast.textContent='Excelファイルを保存しました'; }, e=>{ toast.textContent=saveErr(e); });
 }
 
 function esc(s){ return String(s).replace(/[&<>"]/g, ch=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[ch])); }

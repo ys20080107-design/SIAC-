@@ -76,11 +76,15 @@ const SCORE_COLS = ['柔軟度','自分を知る','お手本・選択肢','挑�
 const loaded = []; // {name, rows:[{...}], err}
 const filesEl = document.getElementById('files'), drop = document.getElementById('drop');
 
-function saveBook(wb, filename){
+async function saveBook(wb, filename){
   const blob = new Blob([XLSX.write(wb, {bookType:'xlsx', type:'array'})], {type:'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'});
+  // claude.ai のアーティファクト内では downloads 機能で保存（通常のWebページでは undefined）
+  const dl = window.claude && window.claude.use ? await window.claude.use('downloads').catch(()=>null) : null;
+  if(dl){ await dl.save({filename, data:blob}); return; }
   const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = filename;
   document.body.appendChild(a); a.click(); a.remove(); setTimeout(()=>URL.revokeObjectURL(a.href), 4000);
 }
+function saveErr(e){ return e && e.code==='declined' ? '保存をキャンセルしました。' : '保存できませんでした。ブラウザを変えてお試しください。'; }
 function esc(s){ return String(s).replace(/[&<>"]/g, ch=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[ch])); }
 
 async function readFile(f){
@@ -143,8 +147,8 @@ document.getElementById('save').addEventListener('click', ()=>{
   XLSX.utils.book_append_sheet(wb, wa, '回答');
   XLSX.utils.book_append_sheet(wb, wsum, '集計');
   const d = new Date(), p = n=>String(n).padStart(2,'0');
-  try{ saveBook(wb, `kizuki_summary_${d.getFullYear()}${p(d.getMonth()+1)}${p(d.getDate())}.xlsx`); document.getElementById('msg').textContent = '保存しました'; }
-  catch(e){ document.getElementById('msg').textContent = '保存できませんでした。ブラウザを変えてお試しください。'; }
+  const msg = document.getElementById('msg');
+  saveBook(wb, `kizuki_summary_${d.getFullYear()}${p(d.getMonth()+1)}${p(d.getDate())}.xlsx`).then(()=>{ msg.textContent='保存しました'; }, e=>{ msg.textContent=saveErr(e); });
 });
 })();
 </script>
