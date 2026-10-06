@@ -1,0 +1,152 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>きづきの診断 集計</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Kiwi+Maru:wght@500&family=Zen+Maru+Gothic:wght@400;500;700&display=swap">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+<style>
+:root{
+  --paper:#F5F8FB; --sheet:#FFFFFF; --ink:#1D2938; --muted:#5A6778; --line:#D5DEE8; --grid:#E3EAF2;
+  --accent:#3D4A5C; --on-accent:#FFFFFF; --good:#2F8A5B; --low:#B4483C;
+  --f-display:"Kiwi Maru","Hiragino Maru Gothic ProN",serif;
+  --f-body:"Zen Maru Gothic","Hiragino Maru Gothic ProN","Yu Gothic",sans-serif;
+}
+@media (prefers-color-scheme: dark){
+  :root:not([data-theme="light"]){ --paper:#121820; --sheet:#1A222D; --ink:#E5EBF2; --muted:#9BA8B8; --line:#2C3746; --grid:#18202A; --accent:#C3CEDB; --on-accent:#121820; --good:#6BC797; --low:#E8877B; color-scheme:dark; }
+}
+:root[data-theme="dark"]{ --paper:#121820; --sheet:#1A222D; --ink:#E5EBF2; --muted:#9BA8B8; --line:#2C3746; --grid:#18202A; --accent:#C3CEDB; --on-accent:#121820; --good:#6BC797; --low:#E8877B; color-scheme:dark; }
+*{box-sizing:border-box;}
+body{margin:0; background-color:var(--paper); color:var(--ink); font-family:var(--f-body); font-size:15px; line-height:1.75;
+  background-image:linear-gradient(var(--grid) 1px, transparent 1px), linear-gradient(90deg, var(--grid) 1px, transparent 1px); background-size:22px 22px;}
+.wrap{max-width:720px; margin:0 auto; padding:28px 16px 64px;}
+h1{font-family:var(--f-display); font-weight:500; font-size:1.8rem; line-height:1.3; margin:0 0 6px;}
+.lead{margin:0 0 22px; color:var(--muted);}
+.sheet{background:var(--sheet); border:1px solid var(--line); border-radius:12px; padding:20px 18px; margin-bottom:16px;}
+h2{font-family:var(--f-display); font-weight:500; font-size:1.1rem; margin:0 0 8px;}
+.drop{display:block; border:2px dashed var(--line); border-radius:10px; padding:26px 12px; text-align:center; color:var(--muted); cursor:pointer;}
+.drop.over{border-color:var(--accent); color:var(--ink);}
+.drop input{display:none;}
+.btn{font:inherit; font-weight:700; border-radius:10px; padding:13px 16px; cursor:pointer; width:100%; border:none; background:var(--accent); color:var(--on-accent); margin-top:14px;}
+.btn:disabled{opacity:.4; cursor:not-allowed;}
+.btn:focus-visible,.drop:focus-within{outline:2px solid var(--accent); outline-offset:2px;}
+ul.files{list-style:none; padding:0; margin:12px 0 0; font-size:.85rem;}
+ul.files li{padding:4px 0; border-bottom:1px solid var(--line); display:flex; justify-content:space-between; gap:10px;}
+ul.files .ng{color:var(--low);}
+.tblwrap{overflow-x:auto;}
+table{border-collapse:collapse; width:100%; font-size:.85rem; font-variant-numeric:tabular-nums;}
+th,td{border-bottom:1px solid var(--line); padding:6px 8px; text-align:right; white-space:nowrap;}
+th:first-child,td:first-child{text-align:left;}
+th{color:var(--muted); font-weight:500;}
+.note{font-size:.82rem; color:var(--muted); margin:8px 0 0;}
+a{color:inherit;}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>きづきの診断 集計</h1>
+  <p class="lead">各端末で「Excelで保存する」から書き出したファイル（またはスプレッドシートからダウンロードした .xlsx / .csv）をまとめて読み込み、1つのExcelファイルにします。ファイルはこのブラウザの中だけで処理され、どこにも送信されません。</p>
+
+  <section class="sheet">
+    <h2>1. ファイルを読み込む</h2>
+    <label class="drop" id="drop">ここにファイルをドロップ、またはタップして選択（複数可）
+      <input type="file" id="file" accept=".xlsx,.xls,.csv" multiple>
+    </label>
+    <ul class="files" id="files"></ul>
+  </section>
+
+  <section class="sheet" id="sumbox" hidden>
+    <h2>2. 集計結果</h2>
+    <div class="tblwrap" id="summary"></div>
+    <p class="note">スコアは0〜100の平均。「流されやすさ」は高いほど周囲に合わせる傾向です。同じ回答IDの行は1つにまとめています。</p>
+    <button class="btn" id="save" type="button">まとめたExcelを保存する</button>
+    <p class="note" id="msg" aria-live="polite"></p>
+  </section>
+
+  <p class="note"><a href="./">← 診断ページへ戻る</a></p>
+</div>
+
+<script>
+(function(){
+const ROLES = ['親','子ども','大学生'];
+const SCORE_COLS = ['柔軟度','自分を知る','お手本・選択肢','挑戦の機会','流されやすさ','サポーター適性','予想の一致数(子ども本人と)'];
+const loaded = []; // {name, rows:[{...}], err}
+const filesEl = document.getElementById('files'), drop = document.getElementById('drop');
+
+function saveBook(wb, filename){
+  const blob = new Blob([XLSX.write(wb, {bookType:'xlsx', type:'array'})], {type:'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'});
+  const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = filename;
+  document.body.appendChild(a); a.click(); a.remove(); setTimeout(()=>URL.revokeObjectURL(a.href), 4000);
+}
+function esc(s){ return String(s).replace(/[&<>"]/g, ch=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[ch])); }
+
+async function readFile(f){
+  try{
+    const buf = await f.arrayBuffer();
+    const wb = XLSX.read(buf, {type:'array'});
+    const ws = wb.Sheets['回答'] || wb.Sheets[wb.SheetNames[0]];
+    const rows = XLSX.utils.sheet_to_json(ws, {defval:''});
+    if(!rows.length || !('回答者' in rows[0])) throw new Error('「回答者」列が見つかりません');
+    loaded.push({name:f.name, rows});
+  }catch(e){ loaded.push({name:f.name, rows:[], err:e.message||'読み込めませんでした'}); }
+}
+async function addFiles(list){
+  for(const f of list) await readFile(f);
+  render();
+}
+
+function merged(){
+  const byId = new Map(), noId = [];
+  loaded.forEach(l=>l.rows.forEach(r=>{ const id = String(r['回答ID']||''); if(id) byId.set(id, r); else noId.push(r); }));
+  return [...byId.values(), ...noId];
+}
+function headersOf(rows){
+  const hs = []; rows.forEach(r=>Object.keys(r).forEach(k=>{ if(!hs.includes(k)) hs.push(k); })); return hs;
+}
+function avg(vals){ const n = vals.map(Number).filter((v,i)=>vals[i]!=='' && !isNaN(v)); return n.length ? Math.round(n.reduce((a,b)=>a+b,0)/n.length*10)/10 : ''; }
+function summarize(rows, hs){
+  const qs = hs.filter(h=>/^Q\d /.test(h));
+  const cols = SCORE_COLS.filter(c=>hs.includes(c)).concat(qs);
+  const groups = ROLES.map(r=>[r, rows.filter(x=>x['回答者']===r)]).concat([['全体', rows]]);
+  const head = ['回答者','件数', ...cols];
+  const body = groups.map(([r, rs])=>[r, rs.length, ...cols.map(c=>avg(rs.map(x=>x[c])))]);
+  // タイプ別人数
+  const types = [...new Set(rows.map(x=>x['タイプ']).filter(Boolean))];
+  const typeTbl = [['タイプ', ...ROLES, '合計'], ...types.map(t=>[t, ...ROLES.map(r=>rows.filter(x=>x['回答者']===r && x['タイプ']===t).length), rows.filter(x=>x['タイプ']===t).length])];
+  return {head, body, typeTbl};
+}
+
+function render(){
+  filesEl.innerHTML = loaded.map(l=>`<li><span>${esc(l.name)}</span>${l.err?`<span class="ng">${esc(l.err)}</span>`:`<span>${l.rows.length}件</span>`}</li>`).join('');
+  const rows = merged();
+  document.getElementById('sumbox').hidden = !rows.length;
+  if(!rows.length) return;
+  const s = summarize(rows, headersOf(rows));
+  const tbl = (head, body) => `<table><thead><tr>${head.map(h=>`<th>${esc(h.length>16?h.slice(0,16)+'…':h)}</th>`).join('')}</tr></thead><tbody>${body.map(r=>`<tr>${r.map(v=>`<td>${esc(v)}</td>`).join('')}</tr>`).join('')}</tbody></table>`;
+  document.getElementById('summary').innerHTML = `<p class="note">合計 ${rows.length} 件</p>` + tbl(s.head.slice(0,9), s.body.map(r=>r.slice(0,9))) + (s.typeTbl.length>1 ? `<h2 style="margin-top:18px">タイプ別の人数</h2>` + tbl(s.typeTbl[0], s.typeTbl.slice(1)) : '');
+}
+
+document.getElementById('file').addEventListener('change', e=>{ addFiles([...e.target.files]); e.target.value=''; });
+drop.addEventListener('dragover', e=>{ e.preventDefault(); drop.classList.add('over'); });
+drop.addEventListener('dragleave', ()=>drop.classList.remove('over'));
+drop.addEventListener('drop', e=>{ e.preventDefault(); drop.classList.remove('over'); addFiles([...e.dataTransfer.files]); });
+
+document.getElementById('save').addEventListener('click', ()=>{
+  const rows = merged(), hs = headersOf(rows), s = summarize(rows, hs);
+  rows.sort((a,b)=>String(a['回答日時']).localeCompare(String(b['回答日時'])));
+  const wb = XLSX.utils.book_new();
+  const wa = XLSX.utils.json_to_sheet(rows, {header:hs}); wa['!cols'] = hs.map((h,i)=>({wch: i<8?14:16}));
+  const wsum = XLSX.utils.aoa_to_sheet([s.head, ...s.body, [], ...s.typeTbl]); wsum['!cols'] = s.head.map(()=>({wch:14}));
+  XLSX.utils.book_append_sheet(wb, wa, '回答');
+  XLSX.utils.book_append_sheet(wb, wsum, '集計');
+  const d = new Date(), p = n=>String(n).padStart(2,'0');
+  try{ saveBook(wb, `kizuki_summary_${d.getFullYear()}${p(d.getMonth()+1)}${p(d.getDate())}.xlsx`); document.getElementById('msg').textContent = '保存しました'; }
+  catch(e){ document.getElementById('msg').textContent = '保存できませんでした。ブラウザを変えてお試しください。'; }
+});
+})();
+</script>
+</body>
+</html>
