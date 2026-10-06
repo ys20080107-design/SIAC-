@@ -5,6 +5,6 @@
  * group:    既定のグループ名（イベント名など）。URLの ?g=名前 が優先されます。
  */
 window.KIZUKI_CONFIG = {
-  sheetUrl: '',
+  sheetUrl: 'https://script.google.com/macros/s/AKfycbwDL0XFOlyJUvUKmMg8zo3TTClDjGyGWdlK84u3mPJu-HwqXFxgcfr172WjVuCjrke09A/exec',
   group: ''
 };
