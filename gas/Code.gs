@@ -91,7 +91,7 @@ function ensureSummary(ss, cols) {
   sh.setFrozenRows(1);
   const A = "'" + ANSWER_SHEET + "'";
   const colOf = ref => `INDEX(${A}!$A:$CZ,0,MATCH(${ref},${A}!$1:$1,0))`;
-  const roles = ['親', '子ども', '大学生', '全体'];
+  const roles = ['子育て経験のある方', '子育て経験のない方（高校生以下）', '子育て経験のない方（大学生以上）', '全体'];
   const rows = roles.map((r, ri) => {
     const rr = ri + 2;
     const count = r === '全体'
@@ -128,22 +128,26 @@ function reply(obj) {
  * ====================================================================== */
 
 const ANALYSIS_SHEET = '分析';
-const ROLES = ['親', '子ども', '大学生'];
+const ROLES = ['子育て経験のある方', '子育て経験のない方（高校生以下）', '子育て経験のない方（大学生以上）'];
+const ROLE_SHORT = ['子育て経験あり', '高校生以下', '大学生以上'];
+const q = s => '"' + s + '"';
 const ROLE_COLORS = ['#1F72B8', '#C9781E', '#5552B0'];
 const TYPE_NAMES = ['自己分析派', 'ロールモデル派', '機会活用派', '空気読み派', 'これから探す派'];
 const TYPE_COLORS = ['#1F72B8', '#C9781E', '#2E9A6A', '#5552B0', '#C2455A'];
 const AXIS_ROWS = ['自分を知る', 'お手本・選択肢', '挑戦の機会', '流されやすさ', '柔軟度'];
 // 回答シートの見出し（診断ページと同じ文言）と、グラフ用の短い名前
 const QUESTIONS = [
-  ['Q1 自分が好きなこと・夢中になれることを、すぐに言える', 'Q1 好きなことをすぐ言える'],
-  ['Q2 「こんな人になりたい」と思えるお手本が身近にいる', 'Q2 お手本が身近にいる'],
+  ['Q1 自分が好きなこと・夢中になっていることを聞かれたら、すぐに答える', 'Q1 好きなことをすぐ答える'],
+  ['Q2 「こんな人になりたい」と思うお手本が身近にいる', 'Q2 お手本が身近にいる'],
   ['Q3 「周りがそうしているから」という理由で決めることが多い', 'Q3 周りに合わせて決める'],
-  ['Q4 やってみたいことを、実際に試せる環境がある', 'Q4 試せる環境がある'],
+  ['Q4 やってみたいことを、実際に試している', 'Q4 実際に試している'],
   ['Q5 自分が何をしたいのか、よく分からないことが多い', 'Q5 したいことが分からない'],
   ['Q6 身近な人の生き方は、どれも似たようなものばかりだ', 'Q6 周りの生き方が似ている'],
-  ['Q7 周りと違っても、自分がやりたいことを選べる', 'Q7 違ってもやりたいことを選べる'],
+  ['Q7 周りと違っても、自分がやりたいことを選ぶ', 'Q7 違ってもやりたいことを選ぶ'],
   ['Q8 やってみたいことがあっても、時間や周りの目を理由にあきらめることが多い', 'Q8 あきらめることが多い']
 ];
+const SCENE_COLS = ['場面1（学校に行きたくないとき）', '場面2（何かを選ぶとき）', '場面3（身近な人が「学校に行きたくない」と言ったら）'];
+const SCENE_OPTS = ['A 自分で考えて決める', 'B 身近な人を参考にする', 'C まず試してみる', 'D 周りに合わせる'];
 const FLEX_BINS = [[0, 19], [20, 39], [40, 59], [60, 79], [80, 100]];
 
 function onOpen() {
@@ -198,28 +202,28 @@ function setupAnalysis() {
   // 1. 回答者別の平均スコア
   let r = 5;
   title(r, '1. 回答者別の平均スコア', '0〜100。流されやすさは高いほど周囲に合わせる傾向');
-  header(r + 1, ['項目'].concat(ROLES));
+  header(r + 1, ['項目'].concat(ROLE_SHORT));
   AXIS_ROWS.forEach((name, i) => {
     sh.getRange(r + 2 + i, 1).setValue(name);
     ROLES.forEach((_, j) => sh.getRange(r + 2 + i, 2 + j).setFormula(
-      avg(col('$A' + (r + 2 + i)), [[ROLE, columnLetter(2 + j) + '$' + (r + 1)]])));
+      avg(col('$A' + (r + 2 + i)), [[ROLE, q(ROLES[j])]])));
   });
-  sh.getRange(r + 7, 1).setValue('サポーター適性（大学生）');
-  sh.getRange(r + 7, 4).setFormula(avg(col('"サポーター適性"'), [[ROLE, '"大学生"']]));
+  sh.getRange(r + 7, 1).setValue('サポーター適性（大学生以上）');
+  sh.getRange(r + 7, 4).setFormula(avg(col('"サポーター適性"'), [[ROLE, q(ROLES[2])]]));
   sh.getRange(r + 8, 1).setValue('回答数').setFontColor('#5A6778');
-  ROLES.forEach((_, j) => sh.getRange(r + 8, 2 + j).setFormula(cnt([[ROLE, columnLetter(2 + j) + '$' + (r + 1)]])).setFontColor('#5A6778'));
+  ROLES.forEach((_, j) => sh.getRange(r + 8, 2 + j).setFormula(cnt([[ROLE, q(ROLES[j])]])).setFontColor('#5A6778'));
   blocks.push({ row: r, range: sh.getRange(r + 1, 1, 6, 4), type: Charts.ChartType.COLUMN, colors: ROLE_COLORS,
     title: '回答者別の平均スコア（0〜100）', axis: { v: [0, 100] }, height: 320 });
 
   // 2. 質問ごとの平均
   r = 21;
   title(r, '2. 質問ごとの平均', '1=ちがう 〜 4=そう（素点）');
-  header(r + 1, ['質問'].concat(ROLES));
+  header(r + 1, ['質問'].concat(ROLE_SHORT));
   QUESTIONS.forEach(([full, short], i) => {
     sh.getRange(r + 2 + i, 1).setValue(short);
     sh.getRange(r + 2 + i, 28).setValue(full); // AB列（非表示）に元の見出し
     ROLES.forEach((_, j) => sh.getRange(r + 2 + i, 2 + j).setFormula(
-      avg(col('$AB' + (r + 2 + i)), [[ROLE, columnLetter(2 + j) + '$' + (r + 1)]])));
+      avg(col('$AB' + (r + 2 + i)), [[ROLE, q(ROLES[j])]])));
   });
   scale(sh.getRange(r + 2, 2, 8, 3));
   blocks.push({ row: r, range: sh.getRange(r + 1, 1, 9, 4), type: Charts.ChartType.BAR, colors: ROLE_COLORS,
@@ -227,33 +231,33 @@ function setupAnalysis() {
 
   // 3. 子ども本人と大人の予想
   r = 41;
-  title(r, '3. 子ども本人と大人の予想', '子ども本人の平均と、親・大学生が予想した答えの平均');
-  header(r + 1, ['質問', '子ども本人', '親の予想', '大学生の予想']);
+  title(r, '3. 高校生以下の答えと大人の予想', '高校生以下の方の平均と、子育て経験あり・大学生以上の方が予想した答えの平均');
+  header(r + 1, ['質問', '高校生以下（本人）', '子育て経験ありの予想', '大学生以上の予想']);
   QUESTIONS.forEach(([full, short], i) => {
     const rr = r + 2 + i;
     sh.getRange(rr, 1).setValue(short);
     sh.getRange(rr, 28).setValue(full);
     sh.getRange(rr, 29).setValue('子どもの予想Q' + (i + 1)); // AC列（非表示）
-    sh.getRange(rr, 2).setFormula(avg(col('$AB' + rr), [[ROLE, '"子ども"']]));
-    sh.getRange(rr, 3).setFormula(avg(col('$AC' + rr), [[ROLE, '"親"']]));
-    sh.getRange(rr, 4).setFormula(avg(col('$AC' + rr), [[ROLE, '"大学生"']]));
+    sh.getRange(rr, 2).setFormula(avg(col('$AB' + rr), [[ROLE, q(ROLES[1])]]));
+    sh.getRange(rr, 3).setFormula(avg(col('$AC' + rr), [[ROLE, q(ROLES[0])]]));
+    sh.getRange(rr, 4).setFormula(avg(col('$AC' + rr), [[ROLE, q(ROLES[2])]]));
   });
   scale(sh.getRange(r + 2, 2, 8, 3));
   sh.getRange(r + 10, 1).setValue('予想の一致数の平均（8問中）');
-  sh.getRange(r + 10, 3).setFormula(avg(col('"予想の一致数(子ども本人と)"'), [[ROLE, '"親"']]));
-  sh.getRange(r + 10, 4).setFormula(avg(col('"予想の一致数(子ども本人と)"'), [[ROLE, '"大学生"']]));
-  sh.getRange(r + 11, 1).setValue('一致数は、同じ端末で子どもも答えた回のみ').setFontColor('#5A6778').setFontSize(9);
+  sh.getRange(r + 10, 3).setFormula(avg(col('"予想の一致数(子ども本人と)"'), [[ROLE, q(ROLES[0])]]));
+  sh.getRange(r + 10, 4).setFormula(avg(col('"予想の一致数(子ども本人と)"'), [[ROLE, q(ROLES[2])]]));
+  sh.getRange(r + 11, 1).setValue('一致数は、同じ端末で高校生以下の方も答えた回のみ').setFontColor('#5A6778').setFontSize(9);
   blocks.push({ row: r, range: sh.getRange(r + 1, 1, 9, 4), type: Charts.ChartType.BAR, colors: ROLE_COLORS.slice(1, 2).concat([ROLE_COLORS[0], ROLE_COLORS[2]]),
-    title: '子ども本人の答え と 大人の予想（1〜4）', axis: { h: [1, 4] }, height: 420 });
+    title: '高校生以下の方の答え と 大人の予想（1〜4）', axis: { h: [1, 4] }, height: 420 });
 
   // 4. タイプの分布
   r = 61;
-  title(r, '4. タイプの分布（人数）', '子どもも大人向けのタイプ名で集計');
+  title(r, '4. タイプの分布（人数）', '高校生以下の方も大人向けのタイプ名で集計');
   header(r + 1, ['回答者'].concat(TYPE_NAMES));
   ROLES.forEach((role, i) => {
-    sh.getRange(r + 2 + i, 1).setValue(role);
+    sh.getRange(r + 2 + i, 1).setValue(ROLE_SHORT[i]);
     TYPE_NAMES.forEach((_, j) => sh.getRange(r + 2 + i, 2 + j).setFormula(
-      cnt([[ROLE, '$A' + (r + 2 + i)], [col('"タイプ"'), columnLetter(2 + j) + '$' + (r + 1)]])));
+      cnt([[ROLE, q(role)], [col('"タイプ"'), columnLetter(2 + j) + '$' + (r + 1)]])));
   });
   blocks.push({ row: r, range: sh.getRange(r + 1, 1, 4, 6), type: Charts.ChartType.COLUMN, colors: TYPE_COLORS,
     title: 'タイプの割合（回答者別）', stacked: 'percent', height: 320 });
@@ -261,18 +265,33 @@ function setupAnalysis() {
   // 5. 柔軟度の分布
   r = 77;
   title(r, '5. 柔軟度の分布（人数）', '柔軟度＝自分を知る・お手本・挑戦の機会・流されにくさの平均');
-  header(r + 1, ['柔軟度'].concat(ROLES));
+  header(r + 1, ['柔軟度'].concat(ROLE_SHORT));
   FLEX_BINS.forEach(([lo, hi], i) => {
     const rr = r + 2 + i;
     sh.getRange(rr, 1).setValue(lo + '〜' + hi);
     ROLES.forEach((_, j) => sh.getRange(rr, 2 + j).setFormula(cnt([
-      [ROLE, columnLetter(2 + j) + '$' + (r + 1)],
+      [ROLE, q(ROLES[j])],
       [col('"柔軟度"'), '">=' + lo + '"'], [col('"柔軟度"'), '"<=' + hi + '"']])));
   });
   blocks.push({ row: r, range: sh.getRange(r + 1, 1, 6, 4), type: Charts.ChartType.COLUMN, colors: ROLE_COLORS,
     title: '柔軟度の分布（人数）', height: 320 });
 
-  sh.getRange('B5:F100').setHorizontalAlignment('center').setNumberFormat('0.0');
+  // 6. ふりかえりの選択（場面1〜3の合計）
+  r = 93;
+  title(r, '6. ふりかえりの選択（場面1〜3の合計）', '各場面でA〜Dのどれを選んだかの合計。聞き方は立場ごとに少し違う');
+  header(r + 1, ['回答者'].concat(SCENE_OPTS));
+  ROLES.forEach((role, i) => {
+    sh.getRange(r + 2 + i, 1).setValue(ROLE_SHORT[i]);
+    SCENE_OPTS.forEach((opt, j) => {
+      const parts = SCENE_COLS.map(c => ifs('COUNTIFS', '', [[ROLE, q(role)], [col(q(c)), q(opt.charAt(0) + '*')]]));
+      sh.getRange(r + 2 + i, 2 + j).setFormula('=IFERROR(' + parts.join('+') + ',0)');
+    });
+  });
+  blocks.push({ row: r, range: sh.getRange(r + 1, 1, 4, 5), type: Charts.ChartType.COLUMN, colors: TYPE_COLORS.slice(0, 4),
+    title: 'ふりかえりで選んだ行動の割合（回答者別）', stacked: 'percent', height: 320 });
+
+  sh.getRange('B5:F110').setHorizontalAlignment('center').setNumberFormat('0.0');
+  sh.getRange(95, 2, 3, 4).setNumberFormat('0');
   // 人数の表は整数表示
   sh.getRange(13, 2, 1, 3).setNumberFormat('0');
   sh.getRange(63, 2, 3, 5).setNumberFormat('0');
