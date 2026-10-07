@@ -152,8 +152,59 @@ const FLEX_BINS = [[0, 19], [20, 39], [40, 59], [60, 79], [80, 100]];
 
 function onOpen() {
   SpreadsheetApp.getUi().createMenu('きづきの診断')
-    .addItem('分析シートを作る／作り直す', 'setupAnalysis')
+    .addItem('シートをまとめて作る（集計・回答・分析）', 'setupAll')
+    .addItem('分析シートだけ作り直す', 'setupAnalysis')
     .addToUi();
+}
+
+/** 診断ページが送る列（index.html の HEADERS と同じ並び） */
+const HEADERS = ['回答日時', 'グループ', 'セッションID', '回答ID', '回答者', 'タイプ', 'サブタイプ', '柔軟度',
+  '自分を知る', 'お手本・選択肢', '挑戦の機会', '流されやすさ', '回答の一貫性',
+  '場面1（学校に行きたくないとき）', '場面2（何かを選ぶとき）', '場面3（身近な人が「学校に行きたくない」と言ったら）',
+  'Q1 自分が好きなこと・夢中になっていることを聞かれたら、すぐに答える', 'Q2 「こんな人になりたい」と思うお手本が身近にいる',
+  'Q3 「周りがそうしているから」という理由で決めることが多い', 'Q4 やってみたいことを、実際に試している',
+  'Q5 自分が何をしたいのか、よく分からないことが多い', 'Q6 身近な人の生き方は、どれも似たようなものばかりだ',
+  'Q7 周りと違っても、自分がやりたいことを選ぶ', 'Q8 やってみたいことがあっても、時間や周りの目を理由にあきらめることが多い',
+  '子どもの予想Q1', '子どもの予想Q2', '子どもの予想Q3', '子どもの予想Q4', '子どもの予想Q5', '子どもの予想Q6', '子どもの予想Q7', '子どもの予想Q8',
+  '予想の一致数(子ども本人と)',
+  'S1 年下の子の話を、口をはさまずに最後まで聞く', 'S2 自分の経験は「正解」ではなく、ひとつの例として話す',
+  'S3 学校に行かないなど、自分と違う選択をした子がいたら、その選択を尊重する', 'S4 相手のためを思うと、つい「こうした方がいい」とアドバイスしたくなる',
+  'サポーター適性', '気づいたこと'];
+
+/**
+ * 「集計」「回答」「分析」の3シートをこの順に作る。
+ * 回答シートにすでにデータがあれば残し、見出しが足りない列だけ右に足す。集計・分析は作り直す。
+ */
+function setupAll() {
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  const ans = ss.getSheetByName(ANSWER_SHEET) || ss.insertSheet(ANSWER_SHEET);
+  let cols = ans.getLastColumn() ? ans.getRange(1, 1, 1, ans.getLastColumn()).getValues()[0].map(String) : [];
+  if (cols.length === 0) {
+    cols = HEADERS.slice();
+    ans.getRange(1, 1, 1, cols.length).setValues([cols]);
+  } else {
+    HEADERS.forEach(h => { if (cols.indexOf(h) < 0) { cols.push(h); ans.getRange(1, cols.length).setValue(h); } });
+  }
+  ans.getRange(1, 1, 1, cols.length).setFontWeight('bold').setBackground('#EEF3F8');
+  ans.setFrozenRows(1);
+
+  const oldSum = ss.getSheetByName(SUMMARY_SHEET);
+  if (oldSum) ss.deleteSheet(oldSum);
+  ensureSummary(ss, cols);
+  setupAnalysis();
+
+  // 並び順：集計 → 回答 → 分析
+  [SUMMARY_SHEET, ANSWER_SHEET, ANALYSIS_SHEET].forEach((name, i) => {
+    ss.setActiveSheet(ss.getSheetByName(name));
+    ss.moveActiveSheet(i + 1);
+  });
+  // 何も入っていない初期シート（「シート1」など）は片づける
+  ss.getSheets().forEach(sh => {
+    const n = sh.getName();
+    if ([SUMMARY_SHEET, ANSWER_SHEET, ANALYSIS_SHEET].indexOf(n) < 0 &&
+        sh.getLastRow() === 0 && sh.getLastColumn() === 0 && sh.getCharts().length === 0) ss.deleteSheet(sh);
+  });
+  ss.setActiveSheet(ss.getSheetByName(SUMMARY_SHEET));
 }
 
 function setupAnalysis() {
