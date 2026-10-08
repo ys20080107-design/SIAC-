@@ -158,7 +158,7 @@ function onOpen() {
 }
 
 /** 診断ページが送る列（index.html の HEADERS と同じ並び） */
-const HEADERS = ['回答日時', 'グループ', 'セッションID', '回答ID', '回答者', 'タイプ', 'サブタイプ', '柔軟度',
+const HEADERS = ['回答日時', 'グループ', 'セッションID', '回答ID', '回答者', '学年（高校生以下）', 'タイプ', 'サブタイプ', '柔軟度',
   '自分を知る', 'お手本・選択肢', '挑戦の機会', '流されやすさ', '回答の一貫性',
   '場面1（学校に行きたくないとき）', '場面2（何かを選ぶとき）', '場面3（身近な人が「学校に行きたくない」と言ったら）',
   'Q1 自分が好きなこと・夢中になっていることを聞かれたら、すぐに答える', 'Q2 「こんな人になりたい」と思うお手本が身近にいる',
@@ -341,7 +341,23 @@ function setupAnalysis() {
   blocks.push({ row: r, range: sh.getRange(r + 1, 1, 4, 5), type: Charts.ChartType.COLUMN, colors: TYPE_COLORS.slice(0, 4),
     title: 'ふりかえりで選んだ行動の割合（回答者別）', stacked: 'percent', height: 320 });
 
-  sh.getRange('B5:F110').setHorizontalAlignment('center').setNumberFormat('0.0');
+  // 7. 高校生以下の学年別
+  r = 109;
+  const GRADES = ['小学生', '中学生', '高校生'], GRADE = col('"学年（高校生以下）"');
+  title(r, '7. 高校生以下の学年別の平均スコア', '0〜100。最初の質問で選んだ学年ごと');
+  header(r + 1, ['項目'].concat(GRADES));
+  AXIS_ROWS.forEach((name, i) => {
+    sh.getRange(r + 2 + i, 1).setValue(name);
+    GRADES.forEach((g, j) => sh.getRange(r + 2 + i, 2 + j).setFormula(
+      avg(col('$A' + (r + 2 + i)), [[ROLE, q(ROLES[1])], [GRADE, q(g)]])));
+  });
+  sh.getRange(r + 7, 1).setValue('回答数').setFontColor('#5A6778');
+  GRADES.forEach((g, j) => sh.getRange(r + 7, 2 + j).setFormula(cnt([[ROLE, q(ROLES[1])], [GRADE, q(g)]])).setFontColor('#5A6778'));
+  blocks.push({ row: r, range: sh.getRange(r + 1, 1, 6, 4), type: Charts.ChartType.COLUMN, colors: ['#E0A04A', '#C9781E', '#8A4F12'],
+    title: '高校生以下の学年別 平均スコア（0〜100）', axis: { v: [0, 100] }, height: 320 });
+
+  sh.getRange('B5:F125').setHorizontalAlignment('center').setNumberFormat('0.0');
+  sh.getRange(116, 2, 1, 3).setNumberFormat('0');
   sh.getRange(95, 2, 3, 4).setNumberFormat('0');
   // 人数の表は整数表示
   sh.getRange(13, 2, 1, 3).setNumberFormat('0');

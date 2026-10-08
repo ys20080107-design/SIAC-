@@ -228,6 +228,7 @@ const SUP = [
 ];
 
 /* ふりかえりの場面：選択肢は A=自分で考える / B=身近な人を参考にする / C=まず試す / D=周りに合わせる でそろえている */
+const GRADES = ['小学生','中学生','高校生'];
 const SCENE_AXIS = ['self','role','chance','flow'];
 const SCENE_TEND = {adult:['自分で考えて決める','身近な人を参考にする','まず試してみる','周りに合わせる'],
                     kid:['じぶんで考えて決める','だれかを参考にする','まずやってみる','まわりに合わせる']};
@@ -270,7 +271,8 @@ const SETS = {
     {title:'子どもならどう答える？', tag:'高校生以下と比較', note:PRED_NOTE, lb:'kid',
       items:CORE.map(c=>({id:'p_'+c.id, axis:'pred', text:c.k}))}
   ]},
-  kid:{frame:'じぶんについて', time:'やく3分・11もん', lb:'kid', sections:[
+  kid:{frame:'じぶんについて', time:'やく3分・12もん', lb:'kid', sections:[
+    {title:'はじめに', tag:'学年', kind:'pick', items:[{id:'grade', axis:'grade', text:'いまの学年をえらんでね。', opts:GRADES}]},
     sceneSec('kid', true),
     {title:'いまのじぶん', tag:'3つの立場で共通', items:CORE.map(c=>({id:c.id, axis:c.axis, rev:c.rev, text:c.k}))}
   ]},
@@ -357,6 +359,13 @@ function renderQuiz(){
     sec.items.forEach(it=>{
       n++;
       const cur = state.ans[m][it.id];
+      if(sec.kind==='pick'){
+        h += `<div class="q"><p><b>${n}</b>${it.text}</p><div class="seg s3" role="radiogroup" aria-label="${it.text}">`;
+        it.opts.forEach((o,i)=>{ const id=`${m}-${it.id}-${i}`;
+          h += `<label for="${id}"><input type="radio" id="${id}" name="${m}|${it.id}" value="${o}" ${cur===o?'checked':''}>${o}</label>`; });
+        h += `</div></div>`;
+        return;
+      }
       if(sec.kind==='choice'){
         h += `<div class="q"><p><b>${n}</b>${it.text}</p><div class="opts" role="radiogroup" aria-label="${it.text}">`;
         it.opts.forEach((o,i)=>{ const v=LETTERS[i], id=`${m}-${it.id}-${v}`;
@@ -495,7 +504,7 @@ function copyAll(){
   const lines = ['【きづきの診断】'];
   Object.keys(WHO).filter(k=>state.done[k]).forEach(k=>{
     const sc = scores(k), t = decideType(sc), nm = k==='kid'?TYPES[t.main].k:TYPES[t.main].a;
-    lines.push(`■${WHO[k]}　タイプ：${nm}　柔軟度：${sc.flex}　${reliability(k).text}`);
+    lines.push(`■${WHO[k]}${k==='kid' && state.ans.kid.grade ? '（'+state.ans.kid.grade+'）' : ''}　タイプ：${nm}　柔軟度：${sc.flex}　${reliability(k).text}`);
     lines.push('  ' + AXES.map(a=>`${AXIS_LABEL[a]} ${sc[a]}`).join(' / '));
     lines.push('  回答：' + CORE.map(c=>`${c.id}=${state.ans[k][c.id]}`).join(' '));
     lines.push('  ふりかえり：' + SCENES[k].map((s,i)=>`場面${i+1}=${sceneLabel(k, s.id)}`).join(' '));
@@ -514,7 +523,7 @@ function newId(n){ const a='abcdefghjkmnpqrstuvwxyz23456789'; let s=''; const r=
 function pad(n){ return String(n).padStart(2,'0'); }
 function fmtDate(d){ return `${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`; }
 const QN = CORE.map((c,i)=>`Q${i+1} ${c.a}`);
-const HEADERS = ['回答日時','グループ','セッションID','回答ID','回答者','タイプ','サブタイプ','柔軟度',
+const HEADERS = ['回答日時','グループ','セッションID','回答ID','回答者','学年（高校生以下）','タイプ','サブタイプ','柔軟度',
   ...AXES.map(a=>AXIS_LABEL[a]), '回答の一貫性',
   ...SCENE_TITLE.map((t,i)=>`場面${i+1}（${t}）`),
   ...QN, ...CORE.map((c,i)=>`子どもの予想Q${i+1}`), '予想の一致数(子ども本人と)',
@@ -523,7 +532,7 @@ function buildRow(k){
   const sc = scores(k), t = decideType(sc), a = state.ans[k], nm = x => x ? TYPES[x].a : ''; // 集計しやすいよう子どもも大人向けのタイプ名で記録
   const pred = k!=='kid', kidDone = state.done.kid;
   const match = pred && kidDone ? CORE.filter(c=>a['p_'+c.id]===state.ans.kid[c.id]).length : '';
-  return [fmtDate(state.at[k]||new Date()), GROUP, state.sid, state.rid[k], WHO[k], nm(t.main), nm(t.second), sc.flex,
+  return [fmtDate(state.at[k]||new Date()), GROUP, state.sid, state.rid[k], WHO[k], k==='kid' ? (a.grade||'') : '', nm(t.main), nm(t.second), sc.flex,
     ...AXES.map(x=>sc[x]), relLabel(k),
     ...SCENES[k].map(s=>sceneLabel(k, s.id)),
     ...CORE.map(c=>a[c.id]), ...CORE.map(c=>pred ? a['p_'+c.id] : ''), match,
@@ -563,6 +572,7 @@ function saveXlsx(){
   ws['!cols'] = HEADERS.map((h,i)=>({wch: i<8 ? 14 : h.length>14 ? 18 : 12}));
   const legend = [['項目','説明'],
     ['Q1〜Q8','3者共通の質問。1=ちがう / 2=ややちがう / 3=ややそう / 4=そう（素点）'],
+    ['学年（高校生以下）','高校生以下の方が最初に選んだ学年（小学生・中学生・高校生）'],
     ['場面1〜3','ふりかえりで選んだ行動。A=自分で考えて決める / B=身近な人を参考にする / C=まず試してみる / D=周りに合わせる（場面の聞き方は立場ごとに少し違う）'],
     ['子どもの予想Q1〜Q8','子育て経験のある方・大学生以上の方が「子どもならこう答える」と予想した答え（1〜4）'],
     ['予想の一致数','同じ端末で答えた高校生以下の方の答えと、予想がぴったり一致した数（8問中）'],
