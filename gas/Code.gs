@@ -226,10 +226,14 @@ const HEADERS = [
   "指標：行動意思",
   "気づいたこと",
   "F2 その気づきをきっかけに、やってみたいことがあれば書いてください",
-  "F3 分かりにくかった質問や、改善してほしい点があれば書いてください"
+  "F3 分かりにくかった質問や、改善してほしい点があれば書いてください",
+  "自由記述の仮分類（自動）",
+  "仮分類の根拠"
 ];
 /** チームが自由記述を読んで入力する列（ページからは送らない） */
 const TEAM_HEADER = '自由記述の分類（0〜2・チーム入力）';
+/** ページが自動でつける仮分類（チームの列が空欄ならこちらを使う） */
+const AUTO_HEADER = '自由記述の仮分類（自動）';
 
 /**
  * 「集計」「回答」「分析」の3シートをこの順に作る。
@@ -447,7 +451,15 @@ function setupAnalysis() {
       if (kind === 'avg') c.setFormula(avg(X, byRole(j)));
       if (kind === 'cnt') c.setFormula(cnt(byRole(j)));
       if (kind === 'ge67') c.setFormula(share(X, '">=66.6"', byRole(j)));
-      if (kind === 'team') c.setFormula(share(X, '2', byRole(j)));
+      if (kind === 'team') {
+        // チームの分類があればそれを、空欄なら自動の仮分類を使う
+        const A = col(q(AUTO_HEADER)), cs = byRole(j);
+        // 空欄の判定に頼らないよう「仮分類の数 − チームも入力済みの行の仮分類の数」で数える
+        const C = (extra) => ifs('COUNTIFS', '', cs.concat(extra));
+        const n = `${C([[X, '2']])}+${C([[A, '2']])}-${C([[X, '">=0"'], [A, '2']])}`;
+        const d = `${C([[X, '">=0"']])}+${C([[A, '">=0"']])}-${C([[X, '">=0"'], [A, '">=0"']])}`;
+        c.setFormula(`=IFERROR((${n})/(${d}),"")`);
+      }
       if (kind === 'eq1') c.setFormula(share(X, '1', byRole(j)));
     }
     if (target !== '') {
@@ -458,7 +470,7 @@ function setupAnalysis() {
     sh.getRange(rr, 2, 1, 5).setNumberFormat(fmt);
   });
   sh.getRange(r + 2, 2, S8.length, 6).setHorizontalAlignment('center');
-  sh.getRange(r + 11, 1).setValue('目標の数字は仮置きです。黄色のセルを書き換えると判定が変わります。「具体的な気づき」は回答シートの黄色の列（' + TEAM_HEADER + '）にチームが入力した分だけ数えます。')
+  sh.getRange(r + 11, 1).setValue('目標の数字は仮置きです。黄色のセルを書き換えると判定が変わります。「具体的な気づき」は、回答シートの黄色の列（チームの分類）が入っていればそれを、空欄なら自動の仮分類を使って数えます。')
     .setFontColor('#5A6778').setFontSize(9);
   blocks.push({ row: r, range: sh.getRange(r + 1, 1, 5, 5), type: Charts.ChartType.COLUMN, colors: ['#8A94A3'].concat(ROLE_COLORS),
     title: 'アンケート：気づき・理解のスコア（0〜100）', axis: { v: [0, 100] }, height: 320 });
@@ -516,8 +528,27 @@ function setupAnalysis() {
   });
 
   blocks.concat([{ row: 141 }, { row: 147 }]).forEach(b => sh.getRange(b.row, 2).setHorizontalAlignment('left'));
+  // 所見（自動）：表の数字から文章をつくる。回答が増えると書き換わる
+  const fin = [
+    `IF(N(B131)=0,"アンケートの回答はまだありません。回答が入ると、ここに所見が表示されます。","")`,
+    `IF(N(B131)>0,"・アンケート回答は"&B131&"件（子育て経験あり "&N(C131)&"・高校生以下 "&N(D131)&"・大学生以上 "&N(E131)&"）。"&IF(MIN(N(C131),N(D131),N(E131))<10,"10件未満の立場は参考程度に見てください。",""),"")`,
+    `IF(ISNUMBER(B128),"・自分への気づきは全体で"&TEXT(B128,"0")&"点。目標（"&F128&"）に"&IF(B128>=F128,"届いています","届いていません")&"。67点以上の人は"&ROUND(B132*100)&"%"&"です。","")`,
+    `IF(COUNT(C128:E128)>=2,"・自分への気づきは"&INDEX($C$126:$E$126,1,MATCH(MAX(C128:E128),C128:E128,0))&"が最も高く（"&TEXT(MAX(C128:E128),"0")&"点）、"&INDEX($C$126:$E$126,1,MATCH(MIN(C128:E128),C128:E128,0))&"が最も低い（"&TEXT(MIN(C128:E128),"0")&"点）です。","")`,
+    `IF(ISNUMBER(B133),"・診断前と比べた気づきの伸びは平均"&IF(B133>0,"+","")&TEXT(B133,"0.0")&"。"&IF(B133>=0.5,"診断が、自分の選びかたを考えるきっかけになっています。",IF(B133>0,"少しですが、診断で気づきが深まっています。","診断の前後で大きな変化は見られません。")),"")`,
+    `IF(ISNUMBER(B129),"・大人の子どもへの理解は"&TEXT(B129,"0")&"点で、目標に"&IF(B129>=F129,"届いています","届いていません")&"。"&IF(ISNUMBER(B134),"子どもを分かっているつもりで、ずれに意外さを感じた人（思い込みへの気づき）は"&ROUND(B134*100)&"%"&"（目標"&ROUND(F134*100)&"%"&"）です。",""),"")`,
+    `IF(AND(ISNUMBER(C143),ISNUMBER(C144)),IF(C143>C144,"・予想のずれが多かった人ほど子どもへの理解が高く（"&TEXT(C143,"0")&"点 対 "&TEXT(C144,"0")&"点）、すれ違いを見ることが気づきにつながっているようです。","・予想のずれが多かった人の方が子どもへの理解が高い、という傾向は今のところ見られません（"&TEXT(C143,"0")&"点 対 "&TEXT(C144,"0")&"点）。"),"")`,
+    `IF(ISNUMBER(B130),"・行動意思は"&TEXT(B130,"0")&"点で、目標に"&IF(B130>=F130,"届いています。気づきが「話してみたい」「聞いてみたい」につながっています。","届いていません。気づきを行動につなげる声かけや、次の機会の案内があるとよさそうです。"),"")`,
+    `IF(AND(ISNUMBER(B127),B127<50),"・結果への納得感が"&TEXT(B127,"0")&"点と低めです。質問やタイプの説明が当てはまっていない可能性があります。","")`,
+    `IF(ISNUMBER(B135),"・自由記述で具体的な気づきがあった人は"&ROUND(B135*100)&"%"&"（目標"&ROUND(F135*100)&"%"&"）。うちチームが確認したのは"&${ifs('COUNTIFS', '', done.concat([[col(q(TEAM_HEADER)), '">=0"']]))}&"件で、残りは自動の仮分類です。","")`,
+    `IF(N(B131)>0,"・診断の柔軟度は"&INDEX($B$6:$D$6,1,MATCH(MAX(B11:D11),B11:D11,0))&"が最も高くなっています（"&TEXT(MAX(B11:D11),"0")&"点）。","")`
+  ];
+  sh.getRange('A4').setValue('所見（自動）').setFontWeight('bold').setVerticalAlignment('top');
+  sh.getRange('B4:G4').merge().setFormula('=TEXTJOIN(CHAR(10),TRUE,' + fin.map(f => 'IFERROR(' + f + ',"")').join(',') + ')')
+    .setWrap(true).setVerticalAlignment('top').setHorizontalAlignment('left').setBackground('#F3F7EE');
+  sh.getRange('A4:G4').setBorder(true, true, true, true, false, false, '#B9CDA8', SpreadsheetApp.BorderStyle.SOLID);
+
   sh.hideColumns(26, 4); // Z〜AC（補助列。Z はグループ一覧）
-  sh.setFrozenRows(3);
+  sh.setFrozenRows(2);
   ss.setActiveSheet(sh);
 }
 

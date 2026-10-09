@@ -264,6 +264,25 @@ const svItems = m => (m==='kid' ? SV_KID : SV_ADULT).flatMap(g=>g.items).filter(
 const SV_ALL = SV_ADULT.flatMap(g=>g.items).concat(SV_KID.flatMap(g=>g.items));
 const to100 = v => Math.round((v-1)/3*1000)/10;
 const mean = a => a.reduce((x,y)=>x+y,0)/a.length;
+/* 自由記述の仮分類（0〜2）。チームの確認・修正を前提にした目安
+   0=気づきの記述なし・感想のみ / 1=気づきはあるが一般的 / 2=具体的な出来事・人と結びついた気づき、または具体的な行動の予定 */
+const FT_GENERIC = /^(楽しかった|たのしかった|おもしろかった|面白かった|よかった|良かった|特になし|とくになし|なし|ない|わからない|分からない|むずかしかった|難しかった|ありがとう(ございました)?)[。！!.\s]*$/;
+const FT_CONCRETE = /部活|習い事|習いごと|受験|進学|就職|転校|小学|中学|高校|子どものころ|子どもの頃|子供の頃|こどものころ|昔|思い出|先生|友だち|友達|ともだち|先輩|せんぱい|お母さん|お父さん|おかあさん|おとうさん|母|父|兄|姉|弟|妹|娘|息子|祖父|祖母|おばあちゃん|おじいちゃん|ときに|時に|場面/g;
+const FT_PLAN = /今日|明日|今週|来週|今度|週末|帰ったら|帰って|聞いてみ|きいてみ|話してみ|はなしてみ|やってみ|伝えてみ|つたえてみ|見せたい|みせたい|参加し|さんかし/g;
+const FT_AWARE = /気づ|気付|きづ|わか|分か|意外|いがい|思った|おもった|感じ|知った|しった|なるほど|自分|じぶん|子ども|こども|傾向|流され|合わせ|お手本|あこがれ|すき|好き/;
+function classifyText(note, f2){
+  note = String(note||'').trim(); f2 = String(f2||'').trim();
+  const words = (t, re) => [...new Set(t.match(re) || [])].slice(0,3);
+  if(!note && !f2) return [0, '空欄'];
+  const plan = words(note + ' ' + f2, FT_PLAN), concrete = words(note, FT_CONCRETE), aware = FT_AWARE.test(note);
+  if(FT_GENERIC.test(note) && !plan.length) return [0, '感想のみ'];
+  if(concrete.length && aware) return [2, '具体的な出来事・人：' + concrete.join('、')];
+  if(plan.length) return [2, '行動の予定：' + plan.join('、')];
+  if(aware) return [1, '気づきあり（具体的な出来事は見つからず）'];
+  if(note.length >= 20) return [1, '内容あり（要確認）'];
+  return [0, '気づきの記述なし'];
+}
+
 /* 指標（0〜100。伸びは−3〜+3、思い込みへの気づきは1/0） */
 function svIndex(m){
   const v = state.sv[m], g = id => v[id];
@@ -631,7 +650,7 @@ const HEADERS = ['回答日時','グループ','セッションID','回答ID','�
   ...QN, ...CORE.map((c,i)=>`子どもの予想Q${i+1}`), '予想の一致数(子ども本人と)',
   ...SUP.map((s,i)=>`S${i+1} ${s.a}`), 'サポーター適性',
   'アンケート回答', ...SV_ALL.map(it=>`${it.id.toUpperCase()} ${it.t}`), ...SV_IDX.map(x=>x[1]),
-  '気づいたこと', `F2 ${SV_TEXT.f2}`, `F3 ${SV_TEXT.f3}`];
+  '気づいたこと', `F2 ${SV_TEXT.f2}`, `F3 ${SV_TEXT.f3}`, '自由記述の仮分類（自動）', '仮分類の根拠'];
 function buildRow(k){
   const sc = scores(k), t = decideType(sc), a = state.ans[k], nm = x => x ? TYPES[x].a : ''; // 集計しやすいよう子どもも大人向けのタイプ名で記録
   const pred = k!=='kid', kidDone = state.done.kid;
@@ -643,7 +662,8 @@ function buildRow(k){
     ...SUP.map(s=>k==='univ' ? a[s.id] : ''), k==='univ' ? axisScore('univ','sup') : '',
     state.svDone[k] ? '済' : '', ...SV_ALL.map(it=>state.svDone[k] && state.sv[k][it.id] ? state.sv[k][it.id] : ''),
     ...SV_IDX.map(x=>svIndex(k)[x[0]]),
-    state.note[k], state.svDone[k] ? (state.sv3[k].f2||'') : '', state.svDone[k] ? (state.sv3[k].f3||'') : ''];
+    state.note[k], state.svDone[k] ? (state.sv3[k].f2||'') : '', state.svDone[k] ? (state.sv3[k].f3||'') : '',
+    ...(state.svDone[k] ? classifyText(state.note[k], state.sv3[k].f2) : ['', ''])];
 }
 function relLabel(k){ const r = reliability(k); return r.straight ? '全問同じ回答' : {high:'高い', mid:'ふつう', low:'低め'}[r.level]; }
 function sendText(m){
@@ -689,6 +709,7 @@ function saveXlsx(){
     ['B1〜E3・K1〜K4','アンケートの答え（1=ちがう 〜 4=そう）。B〜Eは大人、Kは高校生以下、E3は大学生以上のみ'],
     ['指標：〜','アンケートから計算。納得感=B1・B2（高校生以下はK1）、自分への気づき=C2〜C4（K2）、子どもへの理解=D2〜D4、行動意思=E1・E2（K3・K4）の平均を0〜100に換算。気づきの伸び=C2−C1（−3〜+3）。思い込みへの気づき=D1とD2がどちらも3以上なら1'],
     ['気づいたこと・F2・F3','アンケートの自由記述（高校生以下は「気づいたこと」のみ）'],
+    ['自由記述の仮分類（自動）','気づいたこと・F2から自動でつけた目安。0=気づきの記述なし / 1=気づきはあるが一般的 / 2=具体的な出来事・人、または行動の予定。チームが確認して直す前提'],
     ['セッションID','同じ端末・同じ回で答えた人に共通のID。家族やグループの回答をつなげるのに使う'],
     ['グループ','URLの ?g=名前 で指定したグループ名（イベント名など）']];
   const wl = XLSX.utils.aoa_to_sheet(legend); wl['!cols']=[{wch:20},{wch:70}];
