@@ -170,6 +170,12 @@ textarea{width:100%; min-height:90px; font:inherit; font-size:.95rem; border:1.5
 .scene .sq{color:var(--muted); font-size:.8rem;}
 .scene .sa{margin-top:2px;}
 .ttag{display:inline-block; font-size:.72rem; font-weight:700; border-radius:999px; padding:0 9px; margin-left:6px; border:1.5px solid var(--accent); color:var(--accent); white-space:nowrap;}
+.survey .sv-h{font-family:var(--f-display); font-weight:500; font-size:.98rem; margin:18px 0 0;}
+.survey .q{padding:12px 0;}
+.survey label.tl{display:block; font-size:.92rem; margin:12px 0 6px;}
+.survey textarea{min-height:72px;}
+.req{font-size:.7rem; color:var(--low); margin-left:6px;}
+.donebox{border:1.5px solid var(--good); border-radius:8px; padding:10px 12px; font-size:.9rem; color:var(--ink);}
 .toast{font-size:.82rem; color:var(--good); text-align:center; margin-top:6px; min-height:1.2em;}
 
 @media (prefers-reduced-motion: reduce){ .progress .fill{transition:none;} }
@@ -220,6 +226,52 @@ const CORE = [
   {id:'c8', axis:'chance', a:'やってみたいことがあっても、時間や周りの目を理由にあきらめることが多い', k:'やってみたいことがあっても、あきらめることが多い', rev:true}
 ];
 const PAIRS = [['c1','c2'],['c3','c4'],['c5','c6'],['c7','c8']];
+
+/* 診断のあとのアンケート：自分の現状にどれだけ気づけたか・理解できたか（4段階） */
+const SV_ADULT = [
+  {sec:'結果への納得感', items:[
+    {id:'b1', t:'診断の結果は、自分に当てはまっていると思う'},
+    {id:'b2', t:'結果の説明は分かりやすかった'}]},
+  {sec:'自分への気づき', items:[
+    {id:'c1', t:'診断を受ける前から、自分がどうやって選んできたかを考えたことがあった'},
+    {id:'c2', t:'診断を受けて、自分の選びかたの傾向がはっきりした'},
+    {id:'c3', t:'これまで気づいていなかった自分の一面に気づいた'},
+    {id:'c4', t:'「周りに合わせて選んだ場面」や「お手本にした人」など、具体的な出来事を思い出した'}]},
+  {sec:'子どもへの理解', items:[
+    {id:'d1', t:'診断の前、身近な子どもの好きなことや気持ちを分かっているつもりだった'},
+    {id:'d2', t:'予想と高校生以下の方の答えがずれた質問があり、意外に感じた（高校生以下の方が回答していない場合は、ずれそうだと感じた）'},
+    {id:'d3', t:'子どもの気持ちを、もっと聞いてみたいと思った'},
+    {id:'d4', t:'自分の考えや経験を、子どもに当てはめていた場面があったと気づいた'}]},
+  {sec:'これからの行動', items:[
+    {id:'e1', t:'この結果について、子どもや身近な人と話してみたい'},
+    {id:'e2', t:'1週間以内に、子どもに好きなことや最近の気持ちを聞いてみようと思う'},
+    {id:'e3', t:'年下の子と関わる機会があれば、参加してみたい', only:'univ'}]}
+];
+const SV_KID = [
+  {sec:'やってみて', items:[
+    {id:'k1', t:'けっかは、じぶんに当てはまっていると思う'},
+    {id:'k2', t:'じぶんのことで、あたらしくわかったことがあった'},
+    {id:'k3', t:'このけっかについて、おうちの人や大人と話してみたい'},
+    {id:'k4', t:'おうちの人に、じぶんの「すき」をもっと知ってほしいと思った'}]}
+];
+const SV_TEXT = {
+  f1:'診断を受けて、一番意外だった結果や、気づいたことを書いてください',
+  f2:'その気づきをきっかけに、やってみたいことがあれば書いてください',
+  f3:'分かりにくかった質問や、改善してほしい点があれば書いてください',
+  k5:'やってみて、きづいたことをかいてね'
+};
+const svItems = m => (m==='kid' ? SV_KID : SV_ADULT).flatMap(g=>g.items).filter(it=>!it.only || it.only===m);
+const SV_ALL = SV_ADULT.flatMap(g=>g.items).concat(SV_KID.flatMap(g=>g.items));
+const to100 = v => Math.round((v-1)/3*1000)/10;
+const mean = a => a.reduce((x,y)=>x+y,0)/a.length;
+/* 指標（0〜100。伸びは−3〜+3、思い込みへの気づきは1/0） */
+function svIndex(m){
+  const v = state.sv[m], g = id => v[id];
+  if(!state.svDone[m]) return {fit:'', self:'', kidu:'', grow:'', bias:'', act:''};
+  if(m==='kid') return {fit:to100(g('k1')), self:to100(g('k2')), kidu:'', grow:'', bias:'', act:to100(mean([g('k3'),g('k4')]))};
+  return {fit:to100(mean([g('b1'),g('b2')])), self:to100(mean([g('c2'),g('c3'),g('c4')])), kidu:to100(mean([g('d2'),g('d3'),g('d4')])),
+    grow:g('c2')-g('c1'), bias:(g('d1')>=3 && g('d2')>=3) ? 1 : 0, act:to100(mean([g('e1'),g('e2')]))};
+}
 const SUP = [
   {id:'u1', axis:'sup', a:'年下の子の話を、口をはさまずに最後まで聞く'},
   {id:'u2', axis:'sup', a:'自分の経験は「正解」ではなく、ひとつの例として話す'},
@@ -314,6 +366,7 @@ const TYPES = {
 };
 
 const state = {mode:'parent', ans:{parent:{}, kid:{}, univ:{}}, done:{parent:false, kid:false, univ:false}, note:{parent:'', kid:'', univ:''},
+  sv:{parent:{}, kid:{}, univ:{}}, svDone:{parent:false, kid:false, univ:false}, sv3:{parent:{}, kid:{}, univ:{}},
   sid: newId(8), rid:{parent:null, kid:null, univ:null}, at:{parent:null, kid:null, univ:null}, sent:{parent:'', kid:'', univ:''}};
 const CFG = window.KIZUKI_CONFIG || {};
 const SHEET_URL = (CFG.sheetUrl || '').trim();
@@ -431,15 +484,62 @@ function renderResult(){
   const missing = Object.keys(WHO).filter(k=>k!==m && !state.done[k]).map(k=>SHORT[k]);
   h += `<div class="block"><h3>${kid?'ほかの人とくらべる':'ほかの人とくらべる'}</h3><p class="note">${others.length? `${others.join('・')}の回答があります。` : ''}${missing.length? `${missing.join('・')}の方にも同じ端末で答えてもらうと、` : ''}「くらべる」タブで違いを見られます。</p><button class="btn inline" type="button" id="go-cmp">くらべるタブを開く</button></div>`;
 
-  h += `<div class="block"><h3>${kid?'やってみて、きづいたことは？':'やってみて気づいたこと'}</h3>
-    <textarea id="note-${m}" placeholder="${kid?'なんでもいいよ':'意外だった結果や、思い出した出来事など'}">${esc(state.note[m])}</textarea>
-    <button class="btn ghost" type="button" id="retake">もう一度答える</button></div>`;
+  h += `<div class="block survey" id="survey">${surveyHtml(m)}</div>`;
+  h += `<div class="block"><button class="btn ghost" type="button" id="retake">もう一度答える</button></div>`;
 
   result.innerHTML = h;
-  document.getElementById('note-'+m).addEventListener('input', e=>{ state.note[m]=e.target.value; });
-  document.getElementById('note-'+m).addEventListener('change', ()=>{ if(state.note[m].trim()) sendRow(m); });
+  bindSurvey(m);
   document.getElementById('go-cmp').addEventListener('click', ()=>{ switchMode('cmp'); window.scrollTo(0,0); });
-  document.getElementById('retake').addEventListener('click', ()=>{ state.ans[m]={}; state.done[m]=false; state.rid[m]=null; state.sent[m]=''; state.note[m]=''; switchMode(m); window.scrollTo(0,0); });
+  document.getElementById('retake').addEventListener('click', ()=>{ state.ans[m]={}; state.done[m]=false; state.rid[m]=null; state.sent[m]=''; state.note[m]=''; state.sv[m]={}; state.sv3[m]={}; state.svDone[m]=false; switchMode(m); window.scrollTo(0,0); });
+}
+
+function surveyHtml(m){
+  const kid = m==='kid';
+  let h = `<h3>${kid?'さいごに：アンケート':'アンケート：診断をやってみて'}</h3>`;
+  if(state.svDone[m]){
+    return h + `<div class="donebox">${kid?'✓ こたえてくれてありがとう！':'✓ アンケートに回答しました。ご協力ありがとうございました。'}</div>`;
+  }
+  h += `<p class="note">${kid?'やってみて、どうだったかおしえてね。':'診断を通して、自分の今の状態にどれくらい気づけたかを教えてください（約2分）。「くらべる」タブを見てから答えても大丈夫です。'}</p>`;
+  const labels = LB[kid?'kid':'adult'];
+  let n = 0;
+  (kid ? SV_KID : SV_ADULT).forEach(g=>{
+    const its = g.items.filter(it=>!it.only || it.only===m);
+    if(!kid) h += `<div class="sv-h">${g.sec}</div>`;
+    its.forEach(it=>{
+      n++;
+      h += `<div class="q"><p><b>${n}</b>${it.t}</p><div class="seg s4" role="radiogroup" aria-label="${it.t}">` +
+        labels.map((lb,i)=>{ const v=i+1, id=`sv-${m}-${it.id}-${v}`; return `<label for="${id}"><input type="radio" id="${id}" name="sv|${m}|${it.id}" value="${v}" ${state.sv[m][it.id]===v?'checked':''}>${lb}</label>`; }).join('') +
+        `</div></div>`;
+    });
+  });
+  if(kid){
+    h += `<label class="tl" for="sv-note-${m}">${SV_TEXT.k5}</label><textarea id="sv-note-${m}" placeholder="なんでもいいよ">${esc(state.note[m])}</textarea>`;
+  } else {
+    h += `<div class="sv-h">自由記述</div>`;
+    h += `<label class="tl" for="sv-note-${m}">${SV_TEXT.f1}<span class="req">必須</span></label><textarea id="sv-note-${m}" placeholder="意外だった結果や、思い出した出来事、人など">${esc(state.note[m])}</textarea>`;
+    h += `<label class="tl" for="sv-f2-${m}">${SV_TEXT.f2}</label><textarea id="sv-f2-${m}">${esc(state.sv3[m].f2||'')}</textarea>`;
+    h += `<label class="tl" for="sv-f3-${m}">${SV_TEXT.f3}</label><textarea id="sv-f3-${m}">${esc(state.sv3[m].f3||'')}</textarea>`;
+  }
+  h += `<button class="btn" id="sv-send" type="button">${kid?'アンケートをおくる':'アンケートを送信する'}</button><p class="hint" id="sv-remain"></p>`;
+  return h;
+}
+function bindSurvey(m){
+  if(state.svDone[m]) return;
+  const box = document.getElementById('survey'), kid = m==='kid';
+  const upd = ()=>{
+    const left = svItems(m).filter(it=>!state.sv[m][it.id]).length + (!kid && !state.note[m].trim() ? 1 : 0);
+    document.getElementById('sv-send').disabled = left>0;
+    document.getElementById('sv-remain').textContent = left ? (kid?`あと${left}こ`:`あと${left}問`) : '';
+  };
+  box.querySelectorAll('input[type=radio]').forEach(inp=>inp.addEventListener('change', e=>{ const [, mm, id] = e.target.name.split('|'); state.sv[mm][id] = Number(e.target.value); upd(); }));
+  document.getElementById('sv-note-'+m).addEventListener('input', e=>{ state.note[m]=e.target.value; upd(); });
+  ['f2','f3'].forEach(f=>{ const el = document.getElementById(`sv-${f}-${m}`); if(el) el.addEventListener('input', e=>{ state.sv3[m][f]=e.target.value; }); });
+  document.getElementById('sv-send').addEventListener('click', ()=>{
+    state.svDone[m] = true; sendRow(m);
+    box.innerHTML = surveyHtml(m);
+    if(!SHEET_URL) box.insertAdjacentHTML('beforeend', `<p class="note" style="margin-top:8px">${kid?'こたえは「くらべる」タブのExcel保存に入ります。':'回答は「くらべる」タブの「Excelで保存する」に含まれます。'}</p>`);
+  });
+  upd();
 }
 
 function ansLabel(raw){ return LB.adult[raw-1]; }
@@ -495,7 +595,7 @@ function renderCompare(){
   const xb = document.getElementById('xlsx'); if(xb) xb.addEventListener('click', saveXlsx);
   const rs = document.getElementById('reset'); if(rs) rs.addEventListener('click', ()=>{
     if(rs.dataset.armed!=='1'){ rs.dataset.armed='1'; rs.textContent='本当に消す（もう一度押してください）'; return; }
-    ['parent','kid','univ'].forEach(k=>{ state.ans[k]={}; state.done[k]=false; state.note[k]=''; state.rid[k]=null; state.at[k]=null; state.sent[k]=''; });
+    ['parent','kid','univ'].forEach(k=>{ state.ans[k]={}; state.done[k]=false; state.note[k]=''; state.sv[k]={}; state.sv3[k]={}; state.svDone[k]=false; state.rid[k]=null; state.at[k]=null; state.sent[k]=''; });
     state.sid = newId(8); switchMode('parent'); window.scrollTo(0,0);
   });
 }
@@ -510,6 +610,7 @@ function copyAll(){
     lines.push('  ふりかえり：' + SCENES[k].map((s,i)=>`場面${i+1}=${sceneLabel(k, s.id)}`).join(' '));
     if(k!=='kid') lines.push('  子どもの予想：' + CORE.map(c=>`${c.id}=${state.ans[k]['p_'+c.id]}`).join(' '));
     if(k==='univ') lines.push(`  サポーター適性：${axisScore('univ','sup')}`);
+    if(state.svDone[k]){ const x = svIndex(k); lines.push(`  アンケート：納得感 ${x.fit} / 自分への気づき ${x.self}${k==='kid'?'':` / 子どもへの理解 ${x.kidu} / 気づきの伸び ${x.grow}`} / 行動意思 ${x.act}`); }
     if(state.note[k]) lines.push(`  気づいたこと：${state.note[k]}`);
   });
   const t = lines.join('\n');
@@ -523,11 +624,14 @@ function newId(n){ const a='abcdefghjkmnpqrstuvwxyz23456789'; let s=''; const r=
 function pad(n){ return String(n).padStart(2,'0'); }
 function fmtDate(d){ return `${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`; }
 const QN = CORE.map((c,i)=>`Q${i+1} ${c.a}`);
+const SV_IDX = [['fit','指標：結果への納得感'],['self','指標：自分への気づき'],['kidu','指標：子どもへの理解'],['grow','指標：気づきの伸び(C2-C1)'],['bias','指標：思い込みへの気づき(1=あり)'],['act','指標：行動意思']];
 const HEADERS = ['回答日時','グループ','セッションID','回答ID','回答者','学年（高校生以下）','タイプ','サブタイプ','柔軟度',
   ...AXES.map(a=>AXIS_LABEL[a]), '回答の一貫性',
   ...SCENE_TITLE.map((t,i)=>`場面${i+1}（${t}）`),
   ...QN, ...CORE.map((c,i)=>`子どもの予想Q${i+1}`), '予想の一致数(子ども本人と)',
-  ...SUP.map((s,i)=>`S${i+1} ${s.a}`), 'サポーター適性', '気づいたこと'];
+  ...SUP.map((s,i)=>`S${i+1} ${s.a}`), 'サポーター適性',
+  'アンケート回答', ...SV_ALL.map(it=>`${it.id.toUpperCase()} ${it.t}`), ...SV_IDX.map(x=>x[1]),
+  '気づいたこと', `F2 ${SV_TEXT.f2}`, `F3 ${SV_TEXT.f3}`];
 function buildRow(k){
   const sc = scores(k), t = decideType(sc), a = state.ans[k], nm = x => x ? TYPES[x].a : ''; // 集計しやすいよう子どもも大人向けのタイプ名で記録
   const pred = k!=='kid', kidDone = state.done.kid;
@@ -536,7 +640,10 @@ function buildRow(k){
     ...AXES.map(x=>sc[x]), relLabel(k),
     ...SCENES[k].map(s=>sceneLabel(k, s.id)),
     ...CORE.map(c=>a[c.id]), ...CORE.map(c=>pred ? a['p_'+c.id] : ''), match,
-    ...SUP.map(s=>k==='univ' ? a[s.id] : ''), k==='univ' ? axisScore('univ','sup') : '', state.note[k]];
+    ...SUP.map(s=>k==='univ' ? a[s.id] : ''), k==='univ' ? axisScore('univ','sup') : '',
+    state.svDone[k] ? '済' : '', ...SV_ALL.map(it=>state.svDone[k] && state.sv[k][it.id] ? state.sv[k][it.id] : ''),
+    ...SV_IDX.map(x=>svIndex(k)[x[0]]),
+    state.note[k], state.svDone[k] ? (state.sv3[k].f2||'') : '', state.svDone[k] ? (state.sv3[k].f3||'') : ''];
 }
 function relLabel(k){ const r = reliability(k); return r.straight ? '全問同じ回答' : {high:'高い', mid:'ふつう', low:'低め'}[r.level]; }
 function sendText(m){
@@ -578,6 +685,10 @@ function saveXlsx(){
     ['予想の一致数','同じ端末で答えた高校生以下の方の答えと、予想がぴったり一致した数（8問中）'],
     ['S1〜S4','大学生以上のみ。サポーター適性の質問（1〜4、S4は逆向きに採点）'],
     ['各スコア','0〜100。「流されやすさ」は高いほど周囲に合わせる傾向。柔軟度では逆向きに数える'],
+    ['アンケート回答','診断のあとのアンケートに答えた人は「済」'],
+    ['B1〜E3・K1〜K4','アンケートの答え（1=ちがう 〜 4=そう）。B〜Eは大人、Kは高校生以下、E3は大学生以上のみ'],
+    ['指標：〜','アンケートから計算。納得感=B1・B2（高校生以下はK1）、自分への気づき=C2〜C4（K2）、子どもへの理解=D2〜D4、行動意思=E1・E2（K3・K4）の平均を0〜100に換算。気づきの伸び=C2−C1（−3〜+3）。思い込みへの気づき=D1とD2がどちらも3以上なら1'],
+    ['気づいたこと・F2・F3','アンケートの自由記述（高校生以下は「気づいたこと」のみ）'],
     ['セッションID','同じ端末・同じ回で答えた人に共通のID。家族やグループの回答をつなげるのに使う'],
     ['グループ','URLの ?g=名前 で指定したグループ名（イベント名など）']];
   const wl = XLSX.utils.aoa_to_sheet(legend); wl['!cols']=[{wch:20},{wch:70}];

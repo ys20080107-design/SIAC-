@@ -45,16 +45,17 @@ function doPost(e) {
       });
     }
 
-    const out = cols.map(h => { const i = headers.indexOf(h); return i < 0 ? '' : clean(row[i]); });
-    out[cols.indexOf(ID_HEADER)] = id;
-
-    // 同じ回答IDの行があれば上書き（気づいたことの追記・予想一致数の更新）、なければ追記
+    // 同じ回答IDの行があれば上書き（アンケート・気づいたことの追記・予想一致数の更新）、なければ追記
     const idCol = cols.indexOf(ID_HEADER) + 1, last = sh.getLastRow();
     let target = 0;
     if (idCol > 0 && last > 1) {
       const ids = sh.getRange(2, idCol, last - 1, 1).getValues();
       for (let i = ids.length - 1; i >= 0; i--) if (String(ids[i][0]) === id) { target = i + 2; break; }
     }
+    // ページが送らない列（チームが入力する「自由記述の分類」など）は、上書きのときも今の値を残す
+    const existing = target ? sh.getRange(target, 1, 1, cols.length).getValues()[0] : null;
+    const out = cols.map((h, c) => { const i = headers.indexOf(h); return i < 0 ? (existing ? existing[c] : '') : clean(row[i]); });
+    out[cols.indexOf(ID_HEADER)] = id;
     if (target) sh.getRange(target, 1, 1, out.length).setValues([out]);
     else sh.getRange(last + 1, 1, 1, out.length).setValues([out]);
 
@@ -85,7 +86,8 @@ function ensureSummary(ss, cols) {
   if (ss.getSheetByName(SUMMARY_SHEET)) return;
   const sh = ss.insertSheet(SUMMARY_SHEET);
   const metrics = cols.filter(h => h === '柔軟度' || h === '自分を知る' || h === 'お手本・選択肢' ||
-    h === '挑戦の機会' || h === '流されやすさ' || h === 'サポーター適性' || /^Q\d /.test(h) || h === '予想の一致数(子ども本人と)');
+    h === '挑戦の機会' || h === '流されやすさ' || h === 'サポーター適性' || /^Q\d /.test(h) || h === '予想の一致数(子ども本人と)' ||
+    /^指標：/.test(h));
   const head = ['回答者', '件数'].concat(metrics);
   sh.getRange(1, 1, 1, head.length).setValues([head]).setFontWeight('bold');
   sh.setFrozenRows(1);
@@ -158,18 +160,76 @@ function onOpen() {
 }
 
 /** 診断ページが送る列（index.html の HEADERS と同じ並び） */
-const HEADERS = ['回答日時', 'グループ', 'セッションID', '回答ID', '回答者', '学年（高校生以下）', 'タイプ', 'サブタイプ', '柔軟度',
-  '自分を知る', 'お手本・選択肢', '挑戦の機会', '流されやすさ', '回答の一貫性',
-  '場面1（学校に行きたくないとき）', '場面2（何かを選ぶとき）', '場面3（身近な人が「学校に行きたくない」と言ったら）',
-  'Q1 自分が好きなこと・夢中になっていることを聞かれたら、すぐに答える', 'Q2 「こんな人になりたい」と思うお手本が身近にいる',
-  'Q3 「周りがそうしているから」という理由で決めることが多い', 'Q4 やってみたいことを、実際に試している',
-  'Q5 自分が何をしたいのか、よく分からないことが多い', 'Q6 身近な人の生き方は、どれも似たようなものばかりだ',
-  'Q7 周りと違っても、自分がやりたいことを選ぶ', 'Q8 やってみたいことがあっても、時間や周りの目を理由にあきらめることが多い',
-  '子どもの予想Q1', '子どもの予想Q2', '子どもの予想Q3', '子どもの予想Q4', '子どもの予想Q5', '子どもの予想Q6', '子どもの予想Q7', '子どもの予想Q8',
-  '予想の一致数(子ども本人と)',
-  'S1 年下の子の話を、口をはさまずに最後まで聞く', 'S2 自分の経験は「正解」ではなく、ひとつの例として話す',
-  'S3 学校に行かないなど、自分と違う選択をした子がいたら、その選択を尊重する', 'S4 相手のためを思うと、つい「こうした方がいい」とアドバイスしたくなる',
-  'サポーター適性', '気づいたこと'];
+const HEADERS = [
+  "回答日時",
+  "グループ",
+  "セッションID",
+  "回答ID",
+  "回答者",
+  "学年（高校生以下）",
+  "タイプ",
+  "サブタイプ",
+  "柔軟度",
+  "自分を知る",
+  "お手本・選択肢",
+  "挑戦の機会",
+  "流されやすさ",
+  "回答の一貫性",
+  "場面1（学校に行きたくないとき）",
+  "場面2（何かを選ぶとき）",
+  "場面3（身近な人が「学校に行きたくない」と言ったら）",
+  "Q1 自分が好きなこと・夢中になっていることを聞かれたら、すぐに答える",
+  "Q2 「こんな人になりたい」と思うお手本が身近にいる",
+  "Q3 「周りがそうしているから」という理由で決めることが多い",
+  "Q4 やってみたいことを、実際に試している",
+  "Q5 自分が何をしたいのか、よく分からないことが多い",
+  "Q6 身近な人の生き方は、どれも似たようなものばかりだ",
+  "Q7 周りと違っても、自分がやりたいことを選ぶ",
+  "Q8 やってみたいことがあっても、時間や周りの目を理由にあきらめることが多い",
+  "子どもの予想Q1",
+  "子どもの予想Q2",
+  "子どもの予想Q3",
+  "子どもの予想Q4",
+  "子どもの予想Q5",
+  "子どもの予想Q6",
+  "子どもの予想Q7",
+  "子どもの予想Q8",
+  "予想の一致数(子ども本人と)",
+  "S1 年下の子の話を、口をはさまずに最後まで聞く",
+  "S2 自分の経験は「正解」ではなく、ひとつの例として話す",
+  "S3 学校に行かないなど、自分と違う選択をした子がいたら、その選択を尊重する",
+  "S4 相手のためを思うと、つい「こうした方がいい」とアドバイスしたくなる",
+  "サポーター適性",
+  "アンケート回答",
+  "B1 診断の結果は、自分に当てはまっていると思う",
+  "B2 結果の説明は分かりやすかった",
+  "C1 診断を受ける前から、自分がどうやって選んできたかを考えたことがあった",
+  "C2 診断を受けて、自分の選びかたの傾向がはっきりした",
+  "C3 これまで気づいていなかった自分の一面に気づいた",
+  "C4 「周りに合わせて選んだ場面」や「お手本にした人」など、具体的な出来事を思い出した",
+  "D1 診断の前、身近な子どもの好きなことや気持ちを分かっているつもりだった",
+  "D2 予想と高校生以下の方の答えがずれた質問があり、意外に感じた（高校生以下の方が回答していない場合は、ずれそうだと感じた）",
+  "D3 子どもの気持ちを、もっと聞いてみたいと思った",
+  "D4 自分の考えや経験を、子どもに当てはめていた場面があったと気づいた",
+  "E1 この結果について、子どもや身近な人と話してみたい",
+  "E2 1週間以内に、子どもに好きなことや最近の気持ちを聞いてみようと思う",
+  "E3 年下の子と関わる機会があれば、参加してみたい",
+  "K1 けっかは、じぶんに当てはまっていると思う",
+  "K2 じぶんのことで、あたらしくわかったことがあった",
+  "K3 このけっかについて、おうちの人や大人と話してみたい",
+  "K4 おうちの人に、じぶんの「すき」をもっと知ってほしいと思った",
+  "指標：結果への納得感",
+  "指標：自分への気づき",
+  "指標：子どもへの理解",
+  "指標：気づきの伸び(C2-C1)",
+  "指標：思い込みへの気づき(1=あり)",
+  "指標：行動意思",
+  "気づいたこと",
+  "F2 その気づきをきっかけに、やってみたいことがあれば書いてください",
+  "F3 分かりにくかった質問や、改善してほしい点があれば書いてください"
+];
+/** チームが自由記述を読んで入力する列（ページからは送らない） */
+const TEAM_HEADER = '自由記述の分類（0〜2・チーム入力）';
 
 /**
  * 「集計」「回答」「分析」の3シートをこの順に作る。
@@ -185,7 +245,11 @@ function setupAll() {
   } else {
     HEADERS.forEach(h => { if (cols.indexOf(h) < 0) { cols.push(h); ans.getRange(1, cols.length).setValue(h); } });
   }
+  if (cols.indexOf(TEAM_HEADER) < 0) { cols.push(TEAM_HEADER); ans.getRange(1, cols.length).setValue(TEAM_HEADER); }
   ans.getRange(1, 1, 1, cols.length).setFontWeight('bold').setBackground('#EEF3F8');
+  ans.getRange(1, cols.indexOf(TEAM_HEADER) + 1).setBackground('#FFF2B3');
+  ans.getRange(2, cols.indexOf(TEAM_HEADER) + 1, Math.max(ans.getMaxRows() - 1, 1), 1).setBackground('#FFFBE6')
+    .setDataValidation(SpreadsheetApp.newDataValidation().requireValueInList(['0', '1', '2'], true).setAllowInvalid(true).build());
   ans.setFrozenRows(1);
 
   const oldSum = ss.getSheetByName(SUMMARY_SHEET);
@@ -356,7 +420,78 @@ function setupAnalysis() {
   blocks.push({ row: r, range: sh.getRange(r + 1, 1, 6, 4), type: Charts.ChartType.COLUMN, colors: ['#E0A04A', '#C9781E', '#8A4F12'],
     title: '高校生以下の学年別 平均スコア（0〜100）', axis: { v: [0, 100] }, height: 320 });
 
-  sh.getRange('B5:F125').setHorizontalAlignment('center').setNumberFormat('0.0');
+  // 8. アンケート：自分の現状への気づき・理解
+  r = 125;
+  const SURV = col('"アンケート回答"'), done = [[SURV, '"済"']];
+  const byRole = j => j === 0 ? done : done.concat([[ROLE, q(ROLES[j - 1])]]);
+  const share = (X, crit, conds) =>
+    `=IFERROR(${ifs('COUNTIFS', '', conds.concat([[X, crit]]))}/${ifs('COUNTIFS', '', conds.concat([[X, '">=0"']]))},"")`;
+  title(r, '8. アンケート：自分の現状への気づき・理解', '診断のあとのアンケートに答えた人のみ。スコアは0〜100（67≒「ややそう」）');
+  header(r + 1, ['指標', '全体'].concat(ROLE_SHORT, ['目標', '判定']));
+  const S8 = [
+    ['結果への納得感', '指標：結果への納得感', 'avg', ''],
+    ['自分への気づき', '指標：自分への気づき', 'avg', 66.6],
+    ['子どもへの理解（大人のみ）', '指標：子どもへの理解', 'avg', 66.6],
+    ['行動意思', '指標：行動意思', 'avg', 66.6],
+    ['アンケート回答数', '', 'cnt', ''],
+    ['自分への気づき 67以上の人の割合', '指標：自分への気づき', 'ge67', ''],
+    ['気づきの伸び（C2−C1、−3〜+3）', '指標：気づきの伸び(C2-C1)', 'avg', ''],
+    ['思い込みに気づいた人の割合（大人のみ）', '指標：思い込みへの気づき(1=あり)', 'eq1', 0.3],
+    ['具体的な気づきがあった人の割合', TEAM_HEADER, 'team', 0.5]
+  ];
+  S8.forEach(([label, colName, kind, target], i) => {
+    const rr = r + 2 + i;
+    sh.getRange(rr, 1).setValue(label);
+    for (let j = 0; j < 4; j++) {
+      const X = colName ? col(q(colName)) : '', c = sh.getRange(rr, 2 + j);
+      if (kind === 'avg') c.setFormula(avg(X, byRole(j)));
+      if (kind === 'cnt') c.setFormula(cnt(byRole(j)));
+      if (kind === 'ge67') c.setFormula(share(X, '">=66.6"', byRole(j)));
+      if (kind === 'team') c.setFormula(share(X, '2', byRole(j)));
+      if (kind === 'eq1') c.setFormula(share(X, '1', byRole(j)));
+    }
+    if (target !== '') {
+      sh.getRange(rr, 6).setValue(target).setBackground('#FFF2B3');
+      sh.getRange(rr, 7).setFormula(`=IF(ISNUMBER(B${rr}),IF(B${rr}>=F${rr},"達成","未達"),"−")`);
+    }
+    const fmt = kind === 'cnt' ? '0' : (kind === 'ge67' || kind === 'team' || kind === 'eq1') ? '0%' : i === 6 ? '0.00' : '0.0';
+    sh.getRange(rr, 2, 1, 5).setNumberFormat(fmt);
+  });
+  sh.getRange(r + 2, 2, S8.length, 6).setHorizontalAlignment('center');
+  sh.getRange(r + 11, 1).setValue('目標の数字は仮置きです。黄色のセルを書き換えると判定が変わります。「具体的な気づき」は回答シートの黄色の列（' + TEAM_HEADER + '）にチームが入力した分だけ数えます。')
+    .setFontColor('#5A6778').setFontSize(9);
+  blocks.push({ row: r, range: sh.getRange(r + 1, 1, 5, 5), type: Charts.ChartType.COLUMN, colors: ['#8A94A3'].concat(ROLE_COLORS),
+    title: 'アンケート：気づき・理解のスコア（0〜100）', axis: { v: [0, 100] }, height: 320 });
+
+  // 9. 予想の一致数と子どもへの理解
+  r = 141;
+  title(r, '9. 予想の一致数と子どもへの理解（大人のみ）', 'ずれが多かった人ほど理解のスコアが高ければ、すれ違いを見ることが気づきにつながっている');
+  header(r + 1, ['予想の一致数', '人数', '子どもへの理解の平均']);
+  const MATCH_COL = col('"予想の一致数(子ども本人と)"'), KIDU = col('"指標：子どもへの理解"');
+  [['0〜4（ずれが多い）', '"<=4"'], ['5〜8（ずれが少ない）', '">=5"']].forEach(([label, crit], i) => {
+    const rr = r + 2 + i, conds = done.concat([[MATCH_COL, crit]]);
+    sh.getRange(rr, 1).setValue(label);
+    sh.getRange(rr, 2).setFormula(cnt(conds)).setNumberFormat('0');
+    sh.getRange(rr, 3).setFormula(avg(KIDU, conds)).setNumberFormat('0.0');
+  });
+  sh.getRange(r + 2, 2, 2, 2).setHorizontalAlignment('center');
+  sh.getRange(r + 4, 1).setValue('同じ端末で高校生以下の方も答えた回だけが対象です。').setFontColor('#5A6778').setFontSize(9);
+
+  // 自由記述の分類基準
+  r = 147;
+  title(r, '自由記述の分類基準（回答シートの黄色の列に 0・1・2 を入力）', '迷ったら低い方の数字にします。2人で別々に分類し、ずれたものを話し合うと判断がぶれにくくなります');
+  header(r + 1, ['分類', '基準', '', '', '', '例']);
+  [[0, '気づきが書かれていない。感想や評価だけ、または空欄。', '「楽しかった」「だいたい予想どおりだった」'],
+   [1, '自分や子どもについての気づきはあるが、一般的・抽象的。', '「自分は流されやすいと思った」「子どものことを分かっていなかった」'],
+   [2, '具体的な出来事・場面・人と結びついた気づき、または具体的な行動の予定がある。', '「中学の部活を友だちに合わせて選んだことを思い出した」「今週、最近夢中なことを聞いてみる」']
+  ].forEach(([n, rule, ex], i) => {
+    const rr = r + 2 + i;
+    sh.getRange(rr, 1).setValue(n).setHorizontalAlignment('center');
+    sh.getRange(rr, 2, 1, 4).merge().setValue(rule).setWrap(true);
+    sh.getRange(rr, 6, 1, 2).merge().setValue(ex).setWrap(true);
+  });
+
+  sh.getRange('B5:F124').setHorizontalAlignment('center').setNumberFormat('0.0');
   sh.getRange(116, 2, 1, 3).setNumberFormat('0');
   sh.getRange(95, 2, 3, 4).setNumberFormat('0');
   // 人数の表は整数表示
@@ -380,7 +515,7 @@ function setupAnalysis() {
     sh.insertChart(cb.build());
   });
 
-  blocks.forEach(b => sh.getRange(b.row, 2).setHorizontalAlignment('left'));
+  blocks.concat([{ row: 141 }, { row: 147 }]).forEach(b => sh.getRange(b.row, 2).setHorizontalAlignment('left'));
   sh.hideColumns(26, 4); // Z〜AC（補助列。Z はグループ一覧）
   sh.setFrozenRows(3);
   ss.setActiveSheet(sh);
